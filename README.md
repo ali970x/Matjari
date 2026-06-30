@@ -73,7 +73,8 @@ Admin features currently available in the Flutter app:
 User features currently available:
 
 - Register and login
-- Download, update, open, and uninstall apps
+- Download and update apps from direct APK/file URLs
+- Open, track, and uninstall apps inside the Matjari library
 - Sync installed apps to the backend user library
 - Submit and read app reviews
 

@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 
 void main() {
@@ -19,6 +20,7 @@ const _apiBaseUrl = String.fromEnvironment(
   'API_BASE_URL',
   defaultValue: 'https://matjari-api.onrender.com',
 );
+const _nativeChannel = MethodChannel('matjari/native');
 
 class MatjariApp extends StatelessWidget {
   const MatjariApp({super.key});
@@ -613,6 +615,23 @@ List<String> _lines(String value) {
       .toList();
 }
 
+Future<bool> _openExternalUrl(String url) async {
+  final uri = Uri.tryParse(url);
+  if (uri == null || !uri.hasScheme) return false;
+  if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return false;
+
+  try {
+    return await _nativeChannel.invokeMethod<bool>('openUrl', {
+          'url': uri.toString(),
+        }) ??
+        false;
+  } on MissingPluginException {
+    return false;
+  } on PlatformException {
+    return false;
+  }
+}
+
 double _ratingForName(String name) {
   final seed = name.codeUnits.fold<int>(0, (sum, code) => sum + code);
   return 4.1 + (seed % 8) / 10;
@@ -988,16 +1007,29 @@ class _MatjariShellState extends State<MatjariShell> {
         if (token != null) {
           unawaited(_syncInstalledApp(token: token, item: item));
         }
-        _showSnack(
-          context,
-          '${updating ? 'Updated' : 'Installed'} ${item.name}.',
-        );
+        unawaited(_finishDownloadAction(item, updating: updating));
       } else {
         _notifyStoreStatusChanged(() {
           _downloadProgress[key] = next;
         });
       }
     });
+  }
+
+  Future<void> _finishDownloadAction(
+    StoreItem item, {
+    required bool updating,
+  }) async {
+    final url = item.fileUrl?.trim() ?? '';
+    final opened = url.isNotEmpty && await _openExternalUrl(url);
+    if (!mounted) return;
+
+    _showSnack(
+      context,
+      opened
+          ? '${updating ? 'Update' : 'Download'} opened for ${item.name}.'
+          : '${updating ? 'Updated' : 'Installed'} ${item.name}.',
+    );
   }
 
   Future<void> _syncInstalledApp({

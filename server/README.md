@@ -33,10 +33,11 @@ GET http://localhost:4000/health
 3. `GET /api/apps?platform=android` to list active Android apps.
 4. `POST /api/apps` with the admin token to create an app.
 5. `POST /api/uploads/icon`, `POST /api/uploads/app-file`, or `POST /api/uploads/screenshots` as multipart form data with the admin token.
-6. `POST /api/apps/:id/update` to publish a new version and set `is_force_update`.
-7. `GET /api/apps/:id/check-update?currentBuild=1` to test update availability.
-8. `GET /api/apps/package/:packageName/check-update?platform=android&currentBuild=1` to test update checks by Android package name.
-9. `POST /api/auth/register`, then `POST /api/downloads`, `POST /api/library/me`, and `POST /api/reviews` with the user token.
+6. Save the returned APK/file URL in the app `file_url` field so Android clients can open the direct download link.
+7. `POST /api/apps/:id/update` to publish a new version and set `is_force_update`.
+8. `GET /api/apps/:id/check-update?currentBuild=1` to test update availability.
+9. `GET /api/apps/package/:packageName/check-update?platform=android&currentBuild=1` to test update checks by Android package name.
+10. `POST /api/auth/register`, then `POST /api/downloads`, `POST /api/library/me`, and `POST /api/reviews` with the user token.
 
 ## Main endpoints
 
