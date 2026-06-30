@@ -665,6 +665,40 @@ Future<int?> _installedPackageVersionCode(String packageName) async {
   }
 }
 
+Future<List<String>> _pickAndUploadAdminFile({
+  required String endpoint,
+  required String token,
+  required String fieldName,
+  required String mimeType,
+  bool allowMultiple = false,
+}) async {
+  if (!_canUseAndroidPackageBridge) {
+    throw Exception('File upload is available on Android only.');
+  }
+
+  final response = await _nativeChannel.invokeMethod<String?>('pickAndUpload', {
+    'endpoint': '$_apiBaseUrl$endpoint',
+    'token': token,
+    'fieldName': fieldName,
+    'mimeType': mimeType,
+    'allowMultiple': allowMultiple,
+  });
+  if (response == null || response.isEmpty) return [];
+
+  final decoded = jsonDecode(response);
+  final payload = decoded is Map<String, dynamic>
+      ? decoded
+      : <String, dynamic>{};
+  final files = payload['files'] is List ? payload['files'] as List : const [];
+
+  return files
+      .whereType<Map>()
+      .map((file) => _stringValue(file['url']))
+      .whereType<String>()
+      .where((url) => url.isNotEmpty)
+      .toList();
+}
+
 bool get _canUseAndroidPackageBridge {
   return !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 }
@@ -4258,6 +4292,7 @@ void _showUpdateSheet(
   final changelogController = TextEditingController();
   var forceUpdate = app.forceUpdate;
   var saving = false;
+  var uploadingFile = false;
 
   showModalBottomSheet<void>(
     context: context,
@@ -4304,6 +4339,38 @@ void _showUpdateSheet(
               decoration: const InputDecoration(
                 labelText: 'New APK / file URL',
               ),
+            ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: saving || uploadingFile
+                  ? null
+                  : () async {
+                      setSheetState(() => uploadingFile = true);
+                      try {
+                        final urls = await _pickAndUploadAdminFile(
+                          endpoint: '/api/uploads/app-file',
+                          token: session.token,
+                          fieldName: 'file',
+                          mimeType: 'application/vnd.android.package-archive',
+                        );
+                        if (urls.isNotEmpty) {
+                          fileUrlController.text = urls.first;
+                          if (context.mounted) {
+                            _showSnack(context, 'APK uploaded.');
+                          }
+                        }
+                      } catch (error) {
+                        if (context.mounted) {
+                          _showSnack(context, error.toString());
+                        }
+                      } finally {
+                        if (sheetContext.mounted) {
+                          setSheetState(() => uploadingFile = false);
+                        }
+                      }
+                    },
+              icon: const Icon(Icons.upload_file),
+              label: Text(uploadingFile ? 'Uploading APK' : 'Upload APK'),
             ),
             const SizedBox(height: 12),
             TextField(
@@ -4398,6 +4465,9 @@ void _showEditSheet(
   );
   var forceUpdate = item?.forceUpdate ?? false;
   var saving = false;
+  var uploadingIcon = false;
+  var uploadingFile = false;
+  var uploadingScreenshots = false;
 
   showModalBottomSheet<void>(
     context: context,
@@ -4463,10 +4533,74 @@ void _showEditSheet(
               decoration: const InputDecoration(labelText: 'Icon URL'),
               controller: iconUrlController,
             ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: saving || uploadingIcon
+                  ? null
+                  : () async {
+                      setSheetState(() => uploadingIcon = true);
+                      try {
+                        final urls = await _pickAndUploadAdminFile(
+                          endpoint: '/api/uploads/icon',
+                          token: session.token,
+                          fieldName: 'icon',
+                          mimeType: 'image/*',
+                        );
+                        if (urls.isNotEmpty) {
+                          iconUrlController.text = urls.first;
+                          if (context.mounted) {
+                            _showSnack(context, 'Icon uploaded.');
+                          }
+                        }
+                      } catch (error) {
+                        if (context.mounted) {
+                          _showSnack(context, error.toString());
+                        }
+                      } finally {
+                        if (sheetContext.mounted) {
+                          setSheetState(() => uploadingIcon = false);
+                        }
+                      }
+                    },
+              icon: const Icon(Icons.image_outlined),
+              label: Text(uploadingIcon ? 'Uploading icon' : 'Upload icon'),
+            ),
             const SizedBox(height: 12),
             TextField(
               decoration: const InputDecoration(labelText: 'APK / file URL'),
               controller: fileUrlController,
+            ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: saving || uploadingFile
+                  ? null
+                  : () async {
+                      setSheetState(() => uploadingFile = true);
+                      try {
+                        final urls = await _pickAndUploadAdminFile(
+                          endpoint: '/api/uploads/app-file',
+                          token: session.token,
+                          fieldName: 'file',
+                          mimeType: 'application/vnd.android.package-archive',
+                        );
+                        if (urls.isNotEmpty) {
+                          fileUrlController.text = urls.first;
+                          if (context.mounted) {
+                            _showSnack(context, 'APK uploaded.');
+                          }
+                        }
+                      } catch (error) {
+                        if (context.mounted) {
+                          _showSnack(context, error.toString());
+                        }
+                      } finally {
+                        if (sheetContext.mounted) {
+                          setSheetState(() => uploadingFile = false);
+                        }
+                      }
+                    },
+              icon: const Icon(Icons.upload_file),
+              label: Text(uploadingFile ? 'Uploading APK' : 'Upload APK'),
             ),
             const SizedBox(height: 12),
             TextField(
@@ -4477,6 +4611,47 @@ void _showEditSheet(
               controller: screenshotsController,
               minLines: 2,
               maxLines: 4,
+            ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: saving || uploadingScreenshots
+                  ? null
+                  : () async {
+                      setSheetState(() => uploadingScreenshots = true);
+                      try {
+                        final urls = await _pickAndUploadAdminFile(
+                          endpoint: '/api/uploads/screenshots',
+                          token: session.token,
+                          fieldName: 'screenshots',
+                          mimeType: 'image/*',
+                          allowMultiple: true,
+                        );
+                        if (urls.isNotEmpty) {
+                          final current = screenshotsController.text.trim();
+                          screenshotsController.text = [
+                            if (current.isNotEmpty) current,
+                            ...urls,
+                          ].join('\n');
+                          if (context.mounted) {
+                            _showSnack(context, 'Screenshots uploaded.');
+                          }
+                        }
+                      } catch (error) {
+                        if (context.mounted) {
+                          _showSnack(context, error.toString());
+                        }
+                      } finally {
+                        if (sheetContext.mounted) {
+                          setSheetState(() => uploadingScreenshots = false);
+                        }
+                      }
+                    },
+              icon: const Icon(Icons.collections_outlined),
+              label: Text(
+                uploadingScreenshots
+                    ? 'Uploading screenshots'
+                    : 'Upload screenshots',
+              ),
             ),
             const SizedBox(height: 8),
             SwitchListTile(

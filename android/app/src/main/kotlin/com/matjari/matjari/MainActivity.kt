@@ -1,14 +1,22 @@
 package com.matjari.matjari
 
+import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.provider.OpenableColumns
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import java.io.ByteArrayOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 
 class MainActivity : FlutterActivity() {
+    private var pendingUploadResult: MethodChannel.Result? = null
+    private var pendingUploadArgs: UploadArgs? = null
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
@@ -18,9 +26,59 @@ class MainActivity : FlutterActivity() {
                     "openUrl" -> result.success(openUrl(call.argument("url")))
                     "openPackage" -> result.success(openPackage(call.argument("packageName")))
                     "installedVersionCode" -> result.success(installedVersionCode(call.argument("packageName")))
+                    "pickAndUpload" -> pickAndUpload(
+                        endpoint = call.argument("endpoint"),
+                        token = call.argument("token"),
+                        fieldName = call.argument("fieldName"),
+                        mimeType = call.argument("mimeType"),
+                        allowMultiple = call.argument<Boolean>("allowMultiple") == true,
+                        result = result,
+                    )
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != PICK_UPLOAD_REQUEST) return
+
+        val result = pendingUploadResult ?: return
+        val args = pendingUploadArgs
+        pendingUploadResult = null
+        pendingUploadArgs = null
+
+        if (resultCode != Activity.RESULT_OK || data == null || args == null) {
+            result.success(null)
+            return
+        }
+
+        val uris = mutableListOf<Uri>()
+        val clipData = data.clipData
+        if (clipData != null) {
+            for (index in 0 until clipData.itemCount) {
+                uris.add(clipData.getItemAt(index).uri)
+            }
+        } else {
+            data.data?.let { uris.add(it) }
+        }
+
+        if (uris.isEmpty()) {
+            result.success(null)
+            return
+        }
+
+        Thread {
+            try {
+                val response = uploadMultipart(args, uris)
+                runOnUiThread { result.success(response) }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    result.error("UPLOAD_FAILED", error.message ?: "Upload failed", null)
+                }
+            }
+        }.start()
     }
 
     private fun openUrl(url: String?): Boolean {
@@ -63,5 +121,105 @@ class MainActivity : FlutterActivity() {
         } catch (_: Exception) {
             null
         }
+    }
+
+    private fun pickAndUpload(
+        endpoint: String?,
+        token: String?,
+        fieldName: String?,
+        mimeType: String?,
+        allowMultiple: Boolean,
+        result: MethodChannel.Result,
+    ) {
+        if (pendingUploadResult != null) {
+            result.error("PICKER_BUSY", "Another file picker is already open", null)
+            return
+        }
+        if (endpoint.isNullOrBlank() || token.isNullOrBlank() || fieldName.isNullOrBlank()) {
+            result.error("BAD_ARGS", "Upload endpoint, token, and field name are required", null)
+            return
+        }
+
+        pendingUploadResult = result
+        pendingUploadArgs = UploadArgs(endpoint, token, fieldName)
+
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = mimeType ?: "*/*"
+            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, allowMultiple)
+        }
+
+        try {
+            startActivityForResult(intent, PICK_UPLOAD_REQUEST)
+        } catch (error: ActivityNotFoundException) {
+            pendingUploadResult = null
+            pendingUploadArgs = null
+            result.error("NO_PICKER", "No file picker is available", null)
+        }
+    }
+
+    private fun uploadMultipart(args: UploadArgs, uris: List<Uri>): String {
+        val boundary = "----Matjari${System.currentTimeMillis()}"
+        val lineBreak = "\r\n"
+        val connection = (URL(args.endpoint).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            doOutput = true
+            connectTimeout = 60000
+            readTimeout = 120000
+            setRequestProperty("Authorization", "Bearer ${args.token}")
+            setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+        }
+
+        connection.outputStream.use { output ->
+            for (uri in uris) {
+                val fileName = displayName(uri)
+                val mimeType = contentResolver.getType(uri) ?: "application/octet-stream"
+                output.write("--$boundary$lineBreak".toByteArray())
+                output.write(
+                    "Content-Disposition: form-data; name=\"${args.fieldName}\"; filename=\"$fileName\"$lineBreak"
+                        .toByteArray(),
+                )
+                output.write("Content-Type: $mimeType$lineBreak$lineBreak".toByteArray())
+                contentResolver.openInputStream(uri)?.use { input ->
+                    input.copyTo(output)
+                } ?: throw IllegalStateException("Could not open selected file")
+                output.write(lineBreak.toByteArray())
+            }
+            output.write("--$boundary--$lineBreak".toByteArray())
+        }
+
+        val status = connection.responseCode
+        val stream = if (status in 200..299) connection.inputStream else connection.errorStream
+        val response = stream?.use { input ->
+            val buffer = ByteArrayOutputStream()
+            input.copyTo(buffer)
+            buffer.toString("UTF-8")
+        } ?: ""
+
+        if (status !in 200..299) {
+            throw IllegalStateException(response.ifBlank { "Upload failed with HTTP $status" })
+        }
+
+        return response
+    }
+
+    private fun displayName(uri: Uri): String {
+        contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (index >= 0 && cursor.moveToFirst()) {
+                return cursor.getString(index)
+            }
+        }
+        return "upload-${System.currentTimeMillis()}"
+    }
+
+    data class UploadArgs(
+        val endpoint: String,
+        val token: String,
+        val fieldName: String,
+    )
+
+    companion object {
+        private const val PICK_UPLOAD_REQUEST = 9401
     }
 }
