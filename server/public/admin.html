@@ -226,6 +226,30 @@
       min-height: 18px;
     }
 
+    .file-input {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .file-picker {
+      display: grid;
+      gap: 8px;
+    }
+
+    .file-picker button {
+      width: fit-content;
+    }
+
+    .file-name {
+      min-height: 20px;
+      color: var(--muted);
+      font-size: 13px;
+      overflow-wrap: anywhere;
+    }
+
     @media (max-width: 820px) {
       header {
         align-items: flex-start;
@@ -331,19 +355,25 @@
 
       <h2>Uploads</h2>
       <div class="row">
-        <label>
-          Icon
-          <input id="iconFile" type="file" accept="image/*">
-        </label>
-        <label>
-          APK / file
-          <input id="appFile" type="file">
-        </label>
+        <div class="file-picker">
+          <label for="iconFile">Icon</label>
+          <input id="iconFile" class="file-input" type="file" accept="image/*">
+          <button id="chooseIcon" class="secondary" type="button">Choose icon</button>
+          <div id="iconFileName" class="file-name">No icon selected</div>
+        </div>
+        <div class="file-picker">
+          <label for="appFile">APK / file</label>
+          <input id="appFile" class="file-input" type="file" accept=".apk,application/vnd.android.package-archive">
+          <button id="chooseApk" class="secondary" type="button">Choose APK file</button>
+          <div id="appFileName" class="file-name">No APK selected</div>
+        </div>
       </div>
-      <label>
-        Screenshots
-        <input id="screenshotsFile" type="file" accept="image/*" multiple>
-      </label>
+      <div class="file-picker">
+        <label for="screenshotsFile">Screenshots</label>
+        <input id="screenshotsFile" class="file-input" type="file" accept="image/*" multiple>
+        <button id="chooseScreenshots" class="secondary" type="button">Choose screenshots</button>
+        <div id="screenshotsFileName" class="file-name">No screenshots selected</div>
+      </div>
 
       <div class="toolbar">
         <button id="uploadIcon" class="secondary">Upload icon</button>
@@ -666,9 +696,24 @@
       setStatus("workspaceStatus", "Ready");
     }
 
+    function connectFilePicker(buttonId, inputId, labelId, emptyText) {
+      const button = $(buttonId);
+      const input = $(inputId);
+      const label = $(labelId);
+
+      button.addEventListener("click", () => input.click());
+      input.addEventListener("change", () => {
+        const names = Array.from(input.files || []).map((file) => file.name);
+        label.textContent = names.length ? names.join(", ") : emptyText;
+      });
+    }
+
     $("loginButton").addEventListener("click", login);
     $("category").addEventListener("change", () => loadSubcategories());
     $("reloadApps").addEventListener("click", loadApps);
+    connectFilePicker("chooseIcon", "iconFile", "iconFileName", "No icon selected");
+    connectFilePicker("chooseApk", "appFile", "appFileName", "No APK selected");
+    connectFilePicker("chooseScreenshots", "screenshotsFile", "screenshotsFileName", "No screenshots selected");
     $("uploadIcon").addEventListener("click", () =>
       uploadWithStatus(() => upload("/api/uploads/icon", "icon", "iconFile", "iconUrl")),
     );
