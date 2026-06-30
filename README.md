@@ -71,3 +71,9 @@ The repo includes `render.yaml` for the backend service. After pushing to GitHub
 2. Set `ADMIN_PASSWORD` in Render environment variables.
 3. Deploy the `matjari-api` service.
 4. Use the Render service URL as `API_BASE_URL` when building Flutter.
+
+Current deployed API:
+
+```text
+https://matjari-api.onrender.com
+```

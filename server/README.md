@@ -81,3 +81,9 @@ The root `render.yaml` creates a Node web service from the `server` folder:
 - Health check: `/health`
 
 Set `ADMIN_PASSWORD` in Render before the first deploy. Render storage is ephemeral on free services, so the JSON database is good for demos; production should move `users`, `apps`, `user_apps`, `downloads`, and `reviews` to PostgreSQL/Supabase.
+
+Current deployed API:
+
+```text
+https://matjari-api.onrender.com
+```
