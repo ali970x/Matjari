@@ -117,9 +117,10 @@ class StoreItem {
       downloads: _downloadLabel(_intValue(json['downloads_count']) ?? 0),
       packageName: packageName,
       platform: _stringValue(json['platform']) ?? 'android',
-      iconUrl: _stringValue(json['icon_url']),
-      fileUrl:
-          _stringValue(json['file_url']) ?? _stringValue(json['apk_file_url']),
+      iconUrl: _absoluteApiUrl(_stringValue(json['icon_url'])),
+      fileUrl: _absoluteApiUrl(
+        _stringValue(json['file_url']) ?? _stringValue(json['apk_file_url']),
+      ),
       screenshotUrls: _screenshotUrls(json['screenshots']),
       forceUpdate: json['is_force_update'] == true,
       updateAvailable: json['is_force_update'] == true,
@@ -160,6 +161,7 @@ List<String> _screenshotUrls(Object? value) {
   return value
       .whereType<Map<String, dynamic>>()
       .map((item) => _stringValue(item['image_url']))
+      .map(_absoluteApiUrl)
       .whereType<String>()
       .toList();
 }
@@ -551,6 +553,14 @@ String? _stringValue(Object? value) {
   if (value == null) return null;
   final text = value.toString().trim();
   return text.isEmpty ? null : text;
+}
+
+String? _absoluteApiUrl(String? value) {
+  if (value == null) return null;
+  final uri = Uri.tryParse(value);
+  if (uri != null && uri.hasScheme) return value;
+  if (value.startsWith('/')) return '$_apiBaseUrl$value';
+  return value;
 }
 
 double? _doubleValue(Object? value) {
