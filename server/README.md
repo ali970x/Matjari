@@ -26,6 +26,12 @@ Health check:
 GET http://localhost:4000/health
 ```
 
+Admin upload console:
+
+```bash
+GET http://localhost:4000/admin
+```
+
 ## Postman flow
 
 1. `POST /api/auth/admin-login` with the default admin body above. Save the returned token as `Bearer {{token}}`.
@@ -41,6 +47,7 @@ GET http://localhost:4000/health
 
 ## Main endpoints
 
+- `GET /admin`
 - `POST /api/auth/register`
 - `POST /api/auth/login`
 - `POST /api/auth/admin-login`

@@ -13,6 +13,7 @@ const categoryRoutes = require('./routes/categoryRoutes');
 const { notFound, errorHandler } = require('./middleware/errorHandler');
 
 const app = express();
+const publicDir = path.resolve(__dirname, '../public');
 
 app.set('trust proxy', true);
 app.use(cors());
@@ -20,6 +21,7 @@ app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan(env.nodeEnv === 'production' ? 'combined' : 'dev'));
 app.use('/uploads', express.static(path.resolve(env.uploadsDir)));
+app.use('/admin-assets', express.static(publicDir));
 
 app.get('/health', (_req, res) => {
   res.json({
@@ -28,6 +30,10 @@ app.get('/health', (_req, res) => {
     data_backend: env.dataBackend,
     upload_backend: env.uploadBackend,
   });
+});
+
+app.get('/admin', (_req, res) => {
+  res.sendFile(path.join(publicDir, 'admin.html'));
 });
 
 app.use('/api/auth', authRoutes);

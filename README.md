@@ -70,6 +70,8 @@ Admin features currently available in the Flutter app:
 - Delete apps
 - View downloads analytics
 
+The backend also serves an upload console at `/admin` on the API host.
+
 User features currently available:
 
 - Register and login
