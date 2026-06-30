@@ -14,6 +14,7 @@ const { notFound, errorHandler } = require('./middleware/errorHandler');
 
 const app = express();
 
+app.set('trust proxy', true);
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
@@ -21,7 +22,12 @@ app.use(morgan(env.nodeEnv === 'production' ? 'combined' : 'dev'));
 app.use('/uploads', express.static(path.resolve(env.uploadsDir)));
 
 app.get('/health', (_req, res) => {
-  res.json({ ok: true, name: 'Matjari API' });
+  res.json({
+    ok: true,
+    name: 'Matjari API',
+    data_backend: env.dataBackend,
+    upload_backend: env.uploadBackend,
+  });
 });
 
 app.use('/api/auth', authRoutes);

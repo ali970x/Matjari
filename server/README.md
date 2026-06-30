@@ -1,6 +1,6 @@
 # Matjari Backend
 
-Offline Node.js + Express API for the Matjari app store. The current backend uses a local JSON file under `server/data/database.json` so it can run before Supabase credentials are available.
+Offline Node.js + Express API for the Matjari app store. By default it uses a local JSON file under `server/data/database.json`, and it can switch to Supabase for durable production data and file uploads.
 
 ## Run locally
 
@@ -68,9 +68,37 @@ GET http://localhost:4000/health
 - `POST /api/categories`
 - `GET /api/subcategories/:categoryId`
 
-## Supabase later
+## Durable Supabase mode
 
-When the offline server is approved, replace the JSON store in `src/services/store.js` with Supabase PostgreSQL queries and point upload responses at Supabase Storage buckets.
+The server can keep the same API while storing the full app state in Supabase. Create this table in the Supabase SQL editor:
+
+```sql
+create table if not exists public.matjari_state (
+  id text primary key,
+  data jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now()
+);
+```
+
+Then set these Render environment variables:
+
+```text
+DATA_BACKEND=supabase
+SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=YOUR_SERVICE_ROLE_KEY
+SUPABASE_STATE_TABLE=matjari_state
+SUPABASE_STATE_ID=default
+```
+
+To store uploaded APKs, icons, and screenshots in Supabase Storage, create a public bucket and add:
+
+```text
+UPLOAD_BACKEND=supabase
+SUPABASE_STORAGE_BUCKET=matjari-uploads
+SUPABASE_STORAGE_PREFIX=uploads
+```
+
+Keep `SUPABASE_SERVICE_ROLE_KEY` only on the backend. Do not put it in Flutter or commit it to Git.
 
 ## Render
 

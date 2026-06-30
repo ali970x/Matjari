@@ -6,6 +6,9 @@ const env = require('../config/env');
 const { httpError } = require('../utils/httpError');
 
 const dbFile = path.join(env.dataDir, 'database.json');
+const supabaseRestBaseUrl = env.supabaseUrl
+  ? `${env.supabaseUrl.replace(/\/+$/, '')}/rest/v1`
+  : '';
 
 let state = emptyState();
 
@@ -35,12 +38,16 @@ async function initStore() {
   await fs.mkdir(env.dataDir, { recursive: true });
   await fs.mkdir(env.uploadsDir, { recursive: true });
 
-  try {
-    const raw = await fs.readFile(dbFile, 'utf8');
-    state = { ...emptyState(), ...JSON.parse(raw) };
-  } catch (error) {
-    if (error.code !== 'ENOENT') throw error;
-    state = emptyState();
+  if (usesSupabaseState()) {
+    state = await loadSupabaseState();
+  } else {
+    try {
+      const raw = await fs.readFile(dbFile, 'utf8');
+      state = { ...emptyState(), ...JSON.parse(raw) };
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+      state = emptyState();
+    }
   }
 
   await seedIfNeeded();
@@ -210,7 +217,79 @@ function ensureAppSeed(data) {
 }
 
 async function save() {
+  if (usesSupabaseState()) {
+    await saveSupabaseState();
+    return;
+  }
   await fs.writeFile(dbFile, JSON.stringify(state, null, 2));
+}
+
+function usesSupabaseState() {
+  return env.dataBackend === 'supabase';
+}
+
+function assertSupabaseStateConfig() {
+  if (!supabaseRestBaseUrl || !env.supabaseServiceRoleKey) {
+    throw new Error(
+      'DATA_BACKEND=supabase requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY',
+    );
+  }
+  if (typeof fetch !== 'function') {
+    throw new Error('DATA_BACKEND=supabase requires Node.js 18+ fetch support');
+  }
+}
+
+function supabaseHeaders(extra = {}) {
+  return {
+    apikey: env.supabaseServiceRoleKey,
+    Authorization: `Bearer ${env.supabaseServiceRoleKey}`,
+    'Content-Type': 'application/json',
+    ...extra,
+  };
+}
+
+async function supabaseRequest(pathname, options = {}) {
+  assertSupabaseStateConfig();
+
+  const response = await fetch(`${supabaseRestBaseUrl}/${pathname}`, {
+    ...options,
+    headers: supabaseHeaders(options.headers),
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(
+      `Supabase state request failed (${response.status}): ${body || response.statusText}`,
+    );
+  }
+
+  if (response.status === 204) return null;
+  const text = await response.text();
+  return text ? JSON.parse(text) : null;
+}
+
+async function loadSupabaseState() {
+  const table = encodeURIComponent(env.supabaseStateTable);
+  const id = encodeURIComponent(env.supabaseStateId);
+  const rows = await supabaseRequest(`${table}?id=eq.${id}&select=data`, {
+    method: 'GET',
+  });
+
+  if (!Array.isArray(rows) || !rows[0]?.data) return emptyState();
+  return { ...emptyState(), ...rows[0].data };
+}
+
+async function saveSupabaseState() {
+  const table = encodeURIComponent(env.supabaseStateTable);
+  await supabaseRequest(`${table}?on_conflict=id`, {
+    method: 'POST',
+    headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+    body: JSON.stringify({
+      id: env.supabaseStateId,
+      data: state,
+      updated_at: now(),
+    }),
+  });
 }
 
 function all(collection) {

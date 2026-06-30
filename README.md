@@ -84,10 +84,12 @@ The repo includes `render.yaml` for the backend service. After pushing to GitHub
 1. Create a Render Blueprint from the repo.
 2. Set `ADMIN_PASSWORD` in Render environment variables.
 3. Deploy the `matjari-api` service.
-4. Use the Render service URL as `API_BASE_URL` when building Flutter.
+4. The Flutter app already defaults to the Render service URL.
 
 Current deployed API:
 
 ```text
 https://matjari-api.onrender.com
 ```
+
+For durable production data outside Google Play, set up Supabase from `server/README.md` and add the `DATA_BACKEND=supabase` variables in Render. For durable uploaded APKs, icons, and screenshots, also enable `UPLOAD_BACKEND=supabase` with a public Supabase Storage bucket.
