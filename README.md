@@ -77,6 +77,7 @@ User features currently available:
 - Register and login
 - Download and update apps from direct APK/file URLs
 - Open, track, and uninstall apps inside the Matjari library
+- Detect installed Android packages after returning from APK installation
 - Sync installed apps to the backend user library
 - Submit and read app reviews
 

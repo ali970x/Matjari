@@ -618,7 +618,7 @@ List<String> _lines(String value) {
 Future<bool> _openExternalUrl(String url) async {
   final uri = Uri.tryParse(url);
   if (uri == null || !uri.hasScheme) return false;
-  if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return false;
+  if (!_canUseAndroidPackageBridge) return false;
 
   try {
     return await _nativeChannel.invokeMethod<bool>('openUrl', {
@@ -630,6 +630,43 @@ Future<bool> _openExternalUrl(String url) async {
   } on PlatformException {
     return false;
   }
+}
+
+Future<bool> _openInstalledPackage(String packageName) async {
+  if (!_canUseAndroidPackageBridge || packageName.trim().isEmpty) return false;
+
+  try {
+    return await _nativeChannel.invokeMethod<bool>('openPackage', {
+          'packageName': packageName,
+        }) ??
+        false;
+  } on MissingPluginException {
+    return false;
+  } on PlatformException {
+    return false;
+  }
+}
+
+Future<int?> _installedPackageVersionCode(String packageName) async {
+  if (!_canUseAndroidPackageBridge || packageName.trim().isEmpty) return null;
+
+  try {
+    final value = await _nativeChannel.invokeMethod<Object?>(
+      'installedVersionCode',
+      {'packageName': packageName},
+    );
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return null;
+  } on MissingPluginException {
+    return null;
+  } on PlatformException {
+    return null;
+  }
+}
+
+bool get _canUseAndroidPackageBridge {
+  return !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 }
 
 double _ratingForName(String name) {
@@ -849,13 +886,17 @@ class MatjariShell extends StatefulWidget {
   State<MatjariShell> createState() => _MatjariShellState();
 }
 
-class _MatjariShellState extends State<MatjariShell> {
+class _MatjariShellState extends State<MatjariShell>
+    with WidgetsBindingObserver {
   final MatjariApi _api = MatjariApi();
   final Map<String, int> _installedBuilds = {};
   final Map<String, double> _downloadProgress = {};
   final Map<String, Timer> _downloadTimers = {};
   final Set<String> _locallyRemoved = {};
   final ValueNotifier<int> _statusRevision = ValueNotifier<int>(0);
+  List<StoreItem> _latestItems = const [];
+  String _lastInstallScanSignature = '';
+  bool _installScanRunning = false;
   late Future<StoreData> _storeFuture;
   AuthSession? _session;
   int _bottomIndex = 1;
@@ -864,11 +905,13 @@ class _MatjariShellState extends State<MatjariShell> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _storeFuture = _api.fetchStoreData();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     for (final timer in _downloadTimers.values) {
       timer.cancel();
     }
@@ -876,7 +919,15 @@ class _MatjariShellState extends State<MatjariShell> {
     super.dispose();
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    _lastInstallScanSignature = '';
+    unawaited(_refreshInstalledPackages(_latestItems));
+  }
+
   void _refreshStore() {
+    _lastInstallScanSignature = '';
     setState(() {
       _storeFuture = _api.fetchStoreData();
     });
@@ -906,6 +957,8 @@ class _MatjariShellState extends State<MatjariShell> {
           ..addAll(library);
         _locallyRemoved.clear();
       });
+      _lastInstallScanSignature = '';
+      unawaited(_refreshInstalledPackages(_latestItems));
     } catch (error) {
       if (mounted) _showSnack(context, 'Could not sync library: $error');
     }
@@ -960,18 +1013,32 @@ class _MatjariShellState extends State<MatjariShell> {
   }
 
   void _handleStoreAction(StoreItem item) {
+    unawaited(_handleStoreActionAsync(item));
+  }
+
+  Future<void> _handleStoreActionAsync(StoreItem item) async {
     final key = _itemKey(item);
     if (_downloadProgress.containsKey(key)) return;
 
     final installedBuild = _installedBuild(item);
     if (installedBuild != null && !_needsUpdate(item)) {
+      final opened = await _openInstalledPackage(item.packageName);
       final token = _session?.token;
-      if (token != null) {
+      if (opened && token != null) {
         unawaited(
           _api.openUserApp(token: token, item: item).catchError((Object _) {}),
         );
       }
-      _showSnack(context, 'Opening ${item.name}.');
+      if (!mounted) return;
+      if (opened) {
+        _showSnack(context, 'Opened ${item.name}.');
+      } else {
+        _notifyStoreStatusChanged(() {
+          _installedBuilds.remove(key);
+          _locallyRemoved.add(key);
+        });
+        _showSnack(context, '${item.name} is not installed on this device.');
+      }
       return;
     }
 
@@ -996,15 +1063,20 @@ class _MatjariShellState extends State<MatjariShell> {
       final current = _downloadProgress[key] ?? 0;
       final next = (current + 0.11).clamp(0.0, 1.0).toDouble();
       if (next >= 1) {
+        final hasDirectDownload = _hasDirectDownload(item);
         timer.cancel();
         _downloadTimers.remove(key);
         _notifyStoreStatusChanged(() {
           _downloadProgress.remove(key);
-          _installedBuilds[key] = item.versionCode;
+          if (!hasDirectDownload) {
+            _installedBuilds[key] = item.versionCode;
+          }
           _locallyRemoved.remove(key);
         });
         final token = _session?.token;
-        if (token != null) {
+        if (token != null && hasDirectDownload) {
+          unawaited(_api.recordDownload(item, token).catchError((Object _) {}));
+        } else if (token != null) {
           unawaited(_syncInstalledApp(token: token, item: item));
         }
         unawaited(_finishDownloadAction(item, updating: updating));
@@ -1030,6 +1102,10 @@ class _MatjariShellState extends State<MatjariShell> {
           ? '${updating ? 'Update' : 'Download'} opened for ${item.name}.'
           : '${updating ? 'Updated' : 'Installed'} ${item.name}.',
     );
+  }
+
+  bool _hasDirectDownload(StoreItem item) {
+    return (item.fileUrl?.trim().isNotEmpty ?? false);
   }
 
   Future<void> _syncInstalledApp({
@@ -1062,7 +1138,74 @@ class _MatjariShellState extends State<MatjariShell> {
             .catchError((Object _) {}),
       );
     }
-    _showSnack(context, '${item.name} uninstalled.');
+    _showSnack(context, '${item.name} removed from your Matjari library.');
+  }
+
+  void _maybeRefreshInstalledPackages(List<StoreItem> items) {
+    if (!_canUseAndroidPackageBridge || items.isEmpty || _installScanRunning) {
+      return;
+    }
+
+    final signature = items
+        .map((item) => '${item.packageName}:${item.versionCode}')
+        .where((value) => !value.startsWith(':'))
+        .join('|');
+    if (signature.isEmpty || signature == _lastInstallScanSignature) return;
+
+    _lastInstallScanSignature = signature;
+    unawaited(_refreshInstalledPackages(items));
+  }
+
+  Future<void> _refreshInstalledPackages(List<StoreItem> items) async {
+    if (!_canUseAndroidPackageBridge || items.isEmpty || _installScanRunning) {
+      return;
+    }
+
+    _installScanRunning = true;
+    final scannedKeys = <String>{};
+    final installed = <String, int>{};
+
+    try {
+      for (final item in items) {
+        if (item.packageName.trim().isEmpty) continue;
+        final key = _itemKey(item);
+        scannedKeys.add(key);
+        final versionCode = await _installedPackageVersionCode(
+          item.packageName,
+        );
+        if (versionCode != null) installed[key] = versionCode;
+      }
+    } finally {
+      _installScanRunning = false;
+    }
+
+    if (!mounted || scannedKeys.isEmpty) return;
+
+    _notifyStoreStatusChanged(() {
+      for (final key in scannedKeys) {
+        final versionCode = installed[key];
+        if (versionCode == null) {
+          _installedBuilds.remove(key);
+        } else {
+          _installedBuilds[key] = versionCode;
+          _locallyRemoved.remove(key);
+        }
+      }
+    });
+
+    final token = _session?.token;
+    if (token != null) {
+      for (final item in items) {
+        final key = _itemKey(item);
+        if (installed.containsKey(key)) {
+          unawaited(
+            _api
+                .saveUserApp(token: token, item: item)
+                .catchError((Object _) {}),
+          );
+        }
+      }
+    }
   }
 
   void _openDetails(StoreItem item) {
@@ -1090,6 +1233,10 @@ class _MatjariShellState extends State<MatjariShell> {
       initialData: StoreData.fallback('Loading Matjari API...'),
       builder: (context, snapshot) {
         final store = snapshot.data ?? StoreData.fallback();
+        _latestItems = store.items;
+        if (snapshot.connectionState == ConnectionState.done) {
+          _maybeRefreshInstalledPackages(store.items);
+        }
         final pages = <Widget>[
           StoreFeedPage(
             feedType: 'games',
@@ -2276,7 +2423,7 @@ class StoreActionControls extends StatelessWidget {
           if (canUninstall) ...[
             const SizedBox(height: 2),
             IconButton(
-              tooltip: 'Uninstall',
+              tooltip: 'Remove from library',
               onPressed: onUninstall,
               icon: const Icon(Icons.delete_outline, size: 19),
               visualDensity: VisualDensity.compact,
