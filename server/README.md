@@ -100,6 +100,8 @@ SUPABASE_STATE_TABLE=matjari_state
 SUPABASE_STATE_ID=default
 ```
 
+Use the base project URL for `SUPABASE_URL`, without `/rest/v1`.
+
 To store uploaded APKs, icons, and screenshots in Supabase Storage, create a public bucket and add:
 
 ```text

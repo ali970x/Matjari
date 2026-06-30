@@ -97,3 +97,5 @@ https://matjari-api.onrender.com
 ```
 
 For durable production data outside Google Play, set up Supabase from `server/README.md` and add the `DATA_BACKEND=supabase` variables in Render. For durable uploaded APKs, icons, and screenshots, also enable `UPLOAD_BACKEND=supabase` with a public Supabase Storage bucket.
+
+Use the base Supabase project URL in Render, for example `https://YOUR_PROJECT.supabase.co`, not the `/rest/v1` API path.

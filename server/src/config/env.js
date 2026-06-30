@@ -3,6 +3,14 @@ require('dotenv').config();
 
 const rootDir = path.resolve(__dirname, '../..');
 
+function normalizeSupabaseUrl(value = '') {
+  return value
+    .trim()
+    .replace(/\/+$/, '')
+    .replace(/\/rest\/v1$/i, '')
+    .replace(/\/storage\/v1$/i, '');
+}
+
 module.exports = {
   nodeEnv: process.env.NODE_ENV || 'development',
   port: Number(process.env.PORT || 4000),
@@ -13,7 +21,7 @@ module.exports = {
   publicBaseUrl: process.env.PUBLIC_BASE_URL || '',
   dataBackend: process.env.DATA_BACKEND || 'json',
   uploadBackend: process.env.UPLOAD_BACKEND || 'local',
-  supabaseUrl: process.env.SUPABASE_URL || '',
+  supabaseUrl: normalizeSupabaseUrl(process.env.SUPABASE_URL || ''),
   supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY || '',
   supabaseStateTable: process.env.SUPABASE_STATE_TABLE || 'matjari_state',
   supabaseStateId: process.env.SUPABASE_STATE_ID || 'default',
