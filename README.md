@@ -35,6 +35,14 @@ For a real Android phone on the same Wi-Fi, replace `YOUR_PC_IP` with the comput
 flutter run --dart-define=API_BASE_URL=http://YOUR_PC_IP:4000
 ```
 
+Build a release APK for direct testing:
+
+```bash
+flutter build apk --release
+```
+
+For Google Play, create a private `android/key.properties` from `android/key.properties.example` and keep the matching `.jks` file local. The project falls back to debug signing when the private release key is not present, so local demo builds still work.
+
 ## Backend
 
 ```bash
