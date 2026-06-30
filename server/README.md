@@ -32,6 +32,8 @@ Admin upload console:
 GET http://localhost:4000/admin
 ```
 
+The console supports admin login, app creation, editing existing apps, deleting apps, uploading APK/icon/screenshot files, and publishing version updates.
+
 ## Postman flow
 
 1. `POST /api/auth/admin-login` with the default admin body above. Save the returned token as `Bearer {{token}}`.

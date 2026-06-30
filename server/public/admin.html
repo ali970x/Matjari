@@ -124,6 +124,12 @@
       color: var(--blue);
     }
 
+    button.danger {
+      border: 1px solid #f1c0bd;
+      background: #fff;
+      color: var(--danger);
+    }
+
     button:disabled {
       opacity: 0.55;
       cursor: not-allowed;
@@ -167,6 +173,59 @@
       font-size: 12px;
     }
 
+    .app-list {
+      display: grid;
+      gap: 8px;
+      max-height: 420px;
+      overflow: auto;
+      padding-right: 2px;
+    }
+
+    .app-card {
+      width: 100%;
+      min-height: auto;
+      display: grid;
+      gap: 4px;
+      justify-items: start;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px 12px;
+      background: #fff;
+      color: var(--ink);
+      text-align: left;
+    }
+
+    .app-card.active {
+      border-color: var(--blue);
+      background: var(--soft-blue);
+    }
+
+    .app-card strong {
+      font-size: 14px;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .check-row {
+      display: flex;
+      gap: 18px;
+      flex-wrap: wrap;
+    }
+
+    .check-row label {
+      display: inline-flex;
+      grid-template-columns: none;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .check-row input {
+      width: 18px;
+      min-height: 18px;
+    }
+
     @media (max-width: 820px) {
       header {
         align-items: flex-start;
@@ -203,10 +262,18 @@
       </label>
       <button id="loginButton">Login</button>
       <div id="loginStatus" class="status">Not signed in</div>
+
+      <div id="appTools" class="stack hidden">
+        <div class="toolbar">
+          <h2>Existing apps</h2>
+          <button id="reloadApps" class="secondary">Reload</button>
+        </div>
+        <div id="appsList" class="app-list"></div>
+      </div>
     </section>
 
     <section id="workspace" class="stack hidden">
-      <h2>Create app</h2>
+      <h2 id="formTitle">Create app</h2>
 
       <div class="row">
         <label>
@@ -251,6 +318,17 @@
         <input id="size" value="Unknown">
       </label>
 
+      <div class="check-row">
+        <label>
+          <input id="isActive" type="checkbox" checked>
+          Active
+        </label>
+        <label>
+          <input id="forceUpdate" type="checkbox">
+          Force update
+        </label>
+      </div>
+
       <h2>Uploads</h2>
       <div class="row">
         <label>
@@ -288,8 +366,16 @@
 
       <div class="toolbar">
         <button id="saveApp">Save app</button>
+        <button id="deleteApp" class="danger">Delete</button>
         <button id="resetForm" class="secondary">Reset</button>
       </div>
+
+      <h2>Release update</h2>
+      <label>
+        Changelog
+        <textarea id="releaseChangelog" placeholder="What changed in this build?"></textarea>
+      </label>
+      <button id="releaseUpdate" class="secondary">Release update from current version fields</button>
       <div id="workspaceStatus" class="status">Ready</div>
     </section>
   </main>
@@ -297,6 +383,8 @@
   <script>
     let token = "";
     let categories = [];
+    let apps = [];
+    let currentAppId = "";
 
     const $ = (id) => document.getElementById(id);
 
@@ -304,6 +392,14 @@
       const element = $(id);
       element.textContent = message;
       element.classList.toggle("error", isError);
+    }
+
+    function escapeHtml(value) {
+      return String(value || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
     }
 
     async function request(path, options = {}) {
@@ -344,7 +440,9 @@
         token = payload.token;
         setStatus("loginStatus", `Signed in as ${payload.user.full_name || payload.user.username}`);
         $("workspace").classList.remove("hidden");
+        $("appTools").classList.remove("hidden");
         await loadCategories();
+        await loadApps();
       } catch (error) {
         setStatus("loginStatus", error.message, true);
       }
@@ -359,7 +457,7 @@
       await loadSubcategories();
     }
 
-    async function loadSubcategories() {
+    async function loadSubcategories(selectedId = "") {
       const categoryId = $("category").value;
       if (!categoryId) {
         $("subcategory").innerHTML = "";
@@ -369,6 +467,61 @@
       $("subcategory").innerHTML = (payload.subcategories || [])
         .map((item) => `<option value="${item.id}">${item.name}</option>`)
         .join("");
+      if (selectedId) $("subcategory").value = selectedId;
+    }
+
+    async function loadApps() {
+      const payload = await request("/api/apps?active=false");
+      apps = payload.apps || [];
+      renderApps();
+    }
+
+    function renderApps() {
+      if (!apps.length) {
+        $("appsList").innerHTML = '<div class="muted">No apps yet</div>';
+        return;
+      }
+
+      $("appsList").innerHTML = apps
+        .map((app) => `
+          <button class="app-card ${app.id === currentAppId ? "active" : ""}" data-app-id="${escapeHtml(app.id)}">
+            <strong>${escapeHtml(app.name)}</strong>
+            <span class="muted">${escapeHtml(app.package_name)} - ${escapeHtml(app.version_name)} (${escapeHtml(app.version_code)})</span>
+          </button>
+        `)
+        .join("");
+
+      for (const button of document.querySelectorAll(".app-card")) {
+        button.addEventListener("click", () => loadApp(button.dataset.appId));
+      }
+    }
+
+    async function loadApp(appId) {
+      const app = apps.find((item) => item.id === appId);
+      if (!app) return;
+
+      currentAppId = app.id;
+      $("formTitle").textContent = `Edit ${app.name}`;
+      $("appName").value = app.name || "";
+      $("packageName").value = app.package_name || "";
+      $("description").value = app.description || "";
+      $("versionName").value = app.version_name || "1.0.0";
+      $("versionCode").value = app.version_code || 1;
+      $("size").value = app.size || "Unknown";
+      $("iconUrl").value = app.icon_url || "";
+      $("fileUrl").value = app.file_url || app.apk_file_url || "";
+      $("screenshotUrls").value = (app.screenshots || [])
+        .map((item) => item.image_url)
+        .filter(Boolean)
+        .join("\n");
+      $("isActive").checked = app.is_active !== false;
+      $("forceUpdate").checked = app.is_force_update === true;
+      $("releaseChangelog").value = "";
+
+      if (app.category_id) $("category").value = app.category_id;
+      await loadSubcategories(app.subcategory_id || "");
+      renderApps();
+      setStatus("workspaceStatus", `Loaded ${app.name}`);
     }
 
     async function upload(endpoint, fieldName, inputId, targetId, multiple = false) {
@@ -428,21 +581,71 @@
             .split(/\r?\n|,/)
             .map((line) => line.trim())
             .filter(Boolean),
-          is_active: true,
-          is_force_update: false,
+          is_active: $("isActive").checked,
+          is_force_update: $("forceUpdate").checked,
         };
 
-        const result = await request("/api/apps", {
-          method: "POST",
+        const result = await request(currentAppId ? `/api/apps/${currentAppId}` : "/api/apps", {
+          method: currentAppId ? "PUT" : "POST",
           body: JSON.stringify(payload),
         });
+        currentAppId = result.app.id;
+        $("formTitle").textContent = `Edit ${result.app.name}`;
         setStatus("workspaceStatus", `Saved ${result.app.name}`);
+        await loadApps();
+      } catch (error) {
+        setStatus("workspaceStatus", error.message, true);
+      }
+    }
+
+    async function deleteCurrentApp() {
+      if (!currentAppId) {
+        setStatus("workspaceStatus", "Choose an app first", true);
+        return;
+      }
+
+      const appName = $("appName").value.trim() || "this app";
+      if (!confirm(`Delete ${appName}?`)) return;
+
+      setStatus("workspaceStatus", "Deleting app...");
+      try {
+        await request(`/api/apps/${currentAppId}`, { method: "DELETE" });
+        resetForm();
+        await loadApps();
+        setStatus("workspaceStatus", `Deleted ${appName}`);
+      } catch (error) {
+        setStatus("workspaceStatus", error.message, true);
+      }
+    }
+
+    async function releaseCurrentUpdate() {
+      if (!currentAppId) {
+        setStatus("workspaceStatus", "Choose an app first", true);
+        return;
+      }
+
+      setStatus("workspaceStatus", "Releasing update...");
+      try {
+        await request(`/api/apps/${currentAppId}/update`, {
+          method: "POST",
+          body: JSON.stringify({
+            version_name: $("versionName").value.trim(),
+            version_code: Number($("versionCode").value || 1),
+            file_url: $("fileUrl").value.trim(),
+            is_force_update: $("forceUpdate").checked,
+            changelog: $("releaseChangelog").value.trim(),
+          }),
+        });
+        await loadApps();
+        setStatus("workspaceStatus", `Released ${$("versionName").value.trim()}`);
       } catch (error) {
         setStatus("workspaceStatus", error.message, true);
       }
     }
 
     function resetForm() {
+      currentAppId = "";
+      $("formTitle").textContent = "Create app";
       for (const id of [
         "appName",
         "packageName",
@@ -456,11 +659,16 @@
       $("versionName").value = "1.0.0";
       $("versionCode").value = "1";
       $("size").value = "Unknown";
+      $("isActive").checked = true;
+      $("forceUpdate").checked = false;
+      $("releaseChangelog").value = "";
+      renderApps();
       setStatus("workspaceStatus", "Ready");
     }
 
     $("loginButton").addEventListener("click", login);
-    $("category").addEventListener("change", loadSubcategories);
+    $("category").addEventListener("change", () => loadSubcategories());
+    $("reloadApps").addEventListener("click", loadApps);
     $("uploadIcon").addEventListener("click", () =>
       uploadWithStatus(() => upload("/api/uploads/icon", "icon", "iconFile", "iconUrl")),
     );
@@ -473,6 +681,8 @@
       ),
     );
     $("saveApp").addEventListener("click", saveApp);
+    $("deleteApp").addEventListener("click", deleteCurrentApp);
+    $("releaseUpdate").addEventListener("click", releaseCurrentUpdate);
     $("resetForm").addEventListener("click", resetForm);
 
     refreshHealth();
