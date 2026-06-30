@@ -17,7 +17,7 @@ const _line = Color(0xFFE0E3E7);
 const _surface = Color(0xFFF7F9FC);
 const _apiBaseUrl = String.fromEnvironment(
   'API_BASE_URL',
-  defaultValue: 'http://localhost:4000',
+  defaultValue: 'https://matjari-api.onrender.com',
 );
 
 class MatjariApp extends StatelessWidget {

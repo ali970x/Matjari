@@ -17,6 +17,12 @@ For Chrome on the same computer:
 flutter run -d chrome --dart-define=API_BASE_URL=http://localhost:4000
 ```
 
+The app defaults to the deployed Render API when no `API_BASE_URL` is passed:
+
+```text
+https://matjari-api.onrender.com
+```
+
 For an Android emulator:
 
 ```bash
