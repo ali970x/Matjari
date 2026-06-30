@@ -231,11 +231,27 @@ class MatjariApi {
   final http.Client _client;
 
   Future<StoreData> fetchStoreData() async {
+    Object? lastError;
+    for (var attempt = 0; attempt < 2; attempt++) {
+      try {
+        return await _fetchStoreDataOnline().timeout(
+          const Duration(seconds: 55),
+        );
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    return StoreData.fallback('Offline mode: ${lastError.toString()}');
+  }
+
+  Future<StoreData> _fetchStoreDataOnline() async {
     try {
+      await _get('/health');
       final responses = await Future.wait([
         _get('/api/apps?platform=android'),
         _get('/api/categories'),
-      ]).timeout(const Duration(seconds: 5));
+      ]);
 
       final appsJson = responses[0]['apps'];
       final categoriesJson = responses[1]['categories'];
@@ -259,7 +275,7 @@ class MatjariApi {
         message: 'Connected to $_apiBaseUrl',
       );
     } catch (error) {
-      return StoreData.fallback('Offline mode: ${error.toString()}');
+      throw Exception(error.toString());
     }
   }
 
