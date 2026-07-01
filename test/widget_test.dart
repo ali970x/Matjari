@@ -6,8 +6,8 @@ void main() {
     await tester.pumpWidget(const MatjariApp());
 
     expect(find.text('Matjari'), findsOneWidget);
-    expect(find.text('WhatsApp'), findsOneWidget);
-    expect(find.text('Google'), findsOneWidget);
-    expect(find.text('Admin'), findsOneWidget);
+    expect(find.text('Login'), findsOneWidget);
+    expect(find.text('Register'), findsOneWidget);
+    expect(find.text('Forget password'), findsOneWidget);
   });
 }

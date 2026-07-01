@@ -4,9 +4,14 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:http/http.dart' as http;
 
-void main() {
+import 'firebase_options.dart';
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   runApp(const MatjariApp());
 }
 
@@ -16,8 +21,10 @@ const _ink = Color(0xFF202124);
 const _muted = Color(0xFF5F6368);
 const _line = Color(0xFFE0E3E7);
 const _surface = Color(0xFFF7F9FC);
-const _appVersionName = '1.1.0';
-const _appBuildNumber = 2;
+const _appVersionName = '1.1.1';
+const _appBuildNumber = 3;
+const _whatsAppOtpEndpoint =
+    'https://whatsapp-server1-production-72d1.up.railway.app/api/whatsapp/send-message';
 const _apiBaseUrl = String.fromEnvironment(
   'API_BASE_URL',
   defaultValue: 'https://matjari-api.onrender.com',
@@ -352,6 +359,27 @@ class MatjariApi {
       'full_name': fullName,
     });
     return _sessionFromPayload(payload);
+  }
+
+  Future<bool> sendWhatsAppOtp({
+    required String numberphone,
+    required String message,
+  }) async {
+    try {
+      final response = await _client
+          .post(
+            Uri.parse(_whatsAppOtpEndpoint),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'numberphone': numberphone,
+              'message': message.trim(),
+            }),
+          )
+          .timeout(const Duration(seconds: 25));
+      return response.statusCode >= 200 && response.statusCode < 300;
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<List<Map<String, dynamic>>> fetchReviews(String appId) async {
@@ -1061,8 +1089,6 @@ const _items = <StoreItem>[
   ),
 ];
 
-enum LoginMode { whatsapp, google, admin }
-
 class AuthGatePage extends StatefulWidget {
   const AuthGatePage({
     super.key,
@@ -1078,7 +1104,19 @@ class AuthGatePage extends StatefulWidget {
 }
 
 class _AuthGatePageState extends State<AuthGatePage> {
-  LoginMode _mode = LoginMode.whatsapp;
+  final _identifierController = TextEditingController();
+  final _passwordController = TextEditingController();
+  String? _pendingOtp;
+  AuthSession? _pendingSession;
+  String _pendingDestination = '';
+  bool _loading = false;
+
+  @override
+  void dispose() {
+    _identifierController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1087,377 +1125,341 @@ class _AuthGatePageState extends State<AuthGatePage> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(22, 22, 22, 28),
           children: [
-            Row(
-              children: [
-                const MatjariMark(size: 54),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: const [
-                      Text(
-                        'Matjari',
-                        style: TextStyle(
-                          fontSize: 28,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                      SizedBox(height: 2),
-                      Text(
-                        'Private app store for Android',
-                        style: TextStyle(color: _muted),
-                      ),
-                    ],
-                  ),
-                ),
-                IconButton(
-                  tooltip: 'App settings',
-                  onPressed: () => showAppSettingsSheet(context),
-                  icon: const Icon(Icons.more_vert),
-                ),
-              ],
-            ),
-            const SizedBox(height: 26),
-            Container(
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                color: const Color(0xFFE8F2FF),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0xFFC9DCF8)),
+            Align(
+              alignment: Alignment.centerRight,
+              child: IconButton(
+                tooltip: 'App settings',
+                onPressed: () => showAppSettingsSheet(context),
+                icon: const Icon(Icons.more_vert),
               ),
-              child: Row(
+            ),
+            const SizedBox(height: 12),
+            Center(
+              child: Column(
                 children: const [
-                  Icon(Icons.verified_user_outlined, color: _brandBlue),
-                  SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      'Sign in once, then browse apps, installs, updates, and your library.',
-                      style: TextStyle(fontWeight: FontWeight.w700),
-                    ),
+                  MatjariMark(size: 86),
+                  SizedBox(height: 16),
+                  Text(
+                    'Matjari',
+                    style: TextStyle(fontSize: 34, fontWeight: FontWeight.w900),
+                  ),
+                  SizedBox(height: 6),
+                  Text(
+                    'Your private Android store',
+                    style: TextStyle(color: _muted, fontSize: 15),
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 22),
-            SegmentedButton<LoginMode>(
-              segments: const [
-                ButtonSegment(
-                  value: LoginMode.whatsapp,
-                  icon: Icon(Icons.chat_outlined),
-                  label: Text('WhatsApp'),
-                ),
-                ButtonSegment(
-                  value: LoginMode.google,
-                  icon: Icon(Icons.account_circle_outlined),
-                  label: Text('Google'),
-                ),
-                ButtonSegment(
-                  value: LoginMode.admin,
-                  icon: Icon(Icons.admin_panel_settings_outlined),
-                  label: Text('Admin'),
-                ),
-              ],
-              selected: {_mode},
-              onSelectionChanged: (value) =>
-                  setState(() => _mode = value.first),
-            ),
-            const SizedBox(height: 18),
-            if (_mode == LoginMode.admin)
-              AdminAuthPanel(
-                api: widget.api,
-                onSessionChanged: widget.onSessionChanged,
+            const SizedBox(height: 30),
+            if (_pendingSession == null)
+              _LoginCard(
+                identifierController: _identifierController,
+                passwordController: _passwordController,
+                loading: _loading,
+                onLogin: _login,
+                onRegister: _register,
+                onForgotPassword: _forgotPassword,
               )
             else
-              OtpAuthPanel(
-                api: widget.api,
-                mode: _mode,
-                onSessionChanged: widget.onSessionChanged,
+              _OtpCard(
+                destination: _pendingDestination,
+                loading: _loading,
+                onVerify: _verifyOtp,
+                onBack: () => setState(() {
+                  _pendingSession = null;
+                  _pendingOtp = null;
+                  _pendingDestination = '';
+                }),
               ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 22),
             const Text(
-              'OTP delivery will use your WhatsApp API when you provide it. For now, the screen is wired and testable with code 123456.',
+              'Admin signs in from the same form using admin / 123456.',
               textAlign: TextAlign.center,
-              style: TextStyle(color: _muted, fontSize: 12, height: 1.35),
+              style: TextStyle(color: _muted, fontSize: 12),
             ),
           ],
         ),
       ),
     );
   }
+
+  Future<void> _login() async {
+    final identifier = _identifierController.text.trim();
+    final password = _passwordController.text;
+    if (identifier.isEmpty || password.isEmpty) {
+      _showSnack(context, 'Enter your email and password.');
+      return;
+    }
+    setState(() => _loading = true);
+    try {
+      final session = await _authenticate(identifier, password);
+      await _beginOtp(session, identifier);
+    } catch (error) {
+      if (mounted) _showSnack(context, error.toString());
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _register() async {
+    final identifier = _identifierController.text.trim();
+    final password = _passwordController.text;
+    if (!identifier.contains('@') || password.length < 6) {
+      _showSnack(context, 'Use a valid email and a 6+ character password.');
+      return;
+    }
+    setState(() => _loading = true);
+    try {
+      final name = identifier.split('@').first.ifEmpty('Matjari User');
+      final session = await widget.api.register(
+        email: identifier.toLowerCase(),
+        password: password,
+        fullName: name,
+      );
+      await _beginOtp(session, identifier);
+    } catch (error) {
+      if (mounted) _showSnack(context, error.toString());
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<AuthSession> _authenticate(String identifier, String password) async {
+    if (identifier.toLowerCase() == 'admin') {
+      return widget.api.adminLogin(username: 'admin', password: password);
+    }
+    try {
+      return await widget.api.login(
+        email: identifier.toLowerCase(),
+        password: password,
+      );
+    } catch (error) {
+      if (identifier.contains('@')) rethrow;
+      return widget.api.adminLogin(username: identifier, password: password);
+    }
+  }
+
+  Future<void> _beginOtp(AuthSession session, String destination) async {
+    final otp = _generateOtp();
+    final message = 'Matjari OTP: $otp';
+    var sent = false;
+    if (_looksLikePhone(destination)) {
+      sent = await widget.api.sendWhatsAppOtp(
+        numberphone: destination,
+        message: message,
+      );
+    }
+    if (!mounted) return;
+    setState(() {
+      _pendingSession = session;
+      _pendingOtp = otp;
+      _pendingDestination = destination;
+    });
+    _showSnack(
+      context,
+      sent
+          ? 'OTP sent on WhatsApp.'
+          : 'OTP ready for testing: $otp. Add a WhatsApp number to send it.',
+    );
+  }
+
+  void _verifyOtp(String value) {
+    final session = _pendingSession;
+    if (session == null) return;
+    if (value.trim() != _pendingOtp) {
+      _showSnack(context, 'Invalid OTP.');
+      return;
+    }
+    widget.onSessionChanged(session);
+    _showSnack(context, 'Welcome ${session.name}.');
+  }
+
+  void _forgotPassword() {
+    _showSnack(
+      context,
+      'Password reset flow is ready for backend email/WhatsApp recovery.',
+    );
+  }
+
+  String _generateOtp() {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    return (100000 + (now % 900000)).toString();
+  }
+
+  bool _looksLikePhone(String value) {
+    final digits = value.replaceAll(RegExp(r'[^0-9]'), '');
+    return digits.length >= 8;
+  }
 }
 
-class OtpAuthPanel extends StatefulWidget {
-  const OtpAuthPanel({
-    super.key,
-    required this.api,
-    required this.mode,
-    required this.onSessionChanged,
+class _LoginCard extends StatelessWidget {
+  const _LoginCard({
+    required this.identifierController,
+    required this.passwordController,
+    required this.loading,
+    required this.onLogin,
+    required this.onRegister,
+    required this.onForgotPassword,
   });
 
-  final MatjariApi api;
-  final LoginMode mode;
-  final ValueChanged<AuthSession> onSessionChanged;
-
-  @override
-  State<OtpAuthPanel> createState() => _OtpAuthPanelState();
-}
-
-class _OtpAuthPanelState extends State<OtpAuthPanel> {
-  final _nameController = TextEditingController(text: 'Matjari User');
-  final _phoneController = TextEditingController();
-  final _emailController = TextEditingController();
-  final _otpController = TextEditingController();
-  bool _otpSent = false;
-  bool _loading = false;
-
-  @override
-  void dispose() {
-    _nameController.dispose();
-    _phoneController.dispose();
-    _emailController.dispose();
-    _otpController.dispose();
-    super.dispose();
-  }
+  final TextEditingController identifierController;
+  final TextEditingController passwordController;
+  final bool loading;
+  final VoidCallback onLogin;
+  final VoidCallback onRegister;
+  final VoidCallback onForgotPassword;
 
   @override
   Widget build(BuildContext context) {
-    final isGoogle = widget.mode == LoginMode.google;
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: _line),
         boxShadow: const [
           BoxShadow(
-            color: Color(0x0F000000),
-            blurRadius: 18,
-            offset: Offset(0, 8),
+            color: Color(0x12000000),
+            blurRadius: 22,
+            offset: Offset(0, 10),
           ),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            isGoogle ? 'Continue with Google' : 'Continue with WhatsApp OTP',
-            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
+          const Text(
+            'Welcome back',
+            style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900),
           ),
           const SizedBox(height: 6),
-          Text(
-            isGoogle
-                ? 'Enter your Google email, then confirm the OTP.'
-                : 'Enter your WhatsApp number, then confirm the OTP.',
-            style: const TextStyle(color: _muted),
+          const Text(
+            'Login to continue to the store.',
+            style: TextStyle(color: _muted),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 18),
           TextField(
-            controller: _nameController,
+            controller: identifierController,
+            keyboardType: TextInputType.emailAddress,
             textInputAction: TextInputAction.next,
-            decoration: const InputDecoration(labelText: 'Full name'),
+            decoration: const InputDecoration(
+              labelText: 'Enter your mail',
+              prefixIcon: Icon(Icons.mail_outline),
+            ),
           ),
           const SizedBox(height: 12),
           TextField(
-            controller: isGoogle ? _emailController : _phoneController,
-            keyboardType: isGoogle
-                ? TextInputType.emailAddress
-                : TextInputType.phone,
-            textInputAction: TextInputAction.next,
-            decoration: InputDecoration(
-              labelText: isGoogle ? 'Google email' : 'WhatsApp number',
-              prefixIcon: Icon(isGoogle ? Icons.mail_outline : Icons.phone),
+            controller: passwordController,
+            obscureText: true,
+            onSubmitted: (_) => onLogin(),
+            decoration: const InputDecoration(
+              labelText: 'Password',
+              prefixIcon: Icon(Icons.lock_outline),
             ),
           ),
-          if (_otpSent) ...[
-            const SizedBox(height: 12),
-            TextField(
-              controller: _otpController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'OTP code',
-                prefixIcon: Icon(Icons.password_outlined),
-              ),
-            ),
-          ],
-          const SizedBox(height: 16),
+          const SizedBox(height: 18),
           FilledButton.icon(
-            onPressed: _loading ? null : (_otpSent ? _verify : _sendOtp),
-            icon: Icon(_otpSent ? Icons.login : Icons.send_outlined),
-            label: Text(
-              _loading
-                  ? 'Please wait'
-                  : _otpSent
-                  ? 'Verify and enter store'
-                  : 'Send OTP',
-            ),
+            onPressed: loading ? null : onLogin,
+            icon: const Icon(Icons.login),
+            label: Text(loading ? 'Please wait' : 'Login'),
           ),
-          if (isGoogle) ...[
-            const SizedBox(height: 10),
-            OutlinedButton.icon(
-              onPressed: _loading
-                  ? null
-                  : () {
-                      if (_emailController.text.trim().isEmpty) {
-                        _emailController.text = 'user@gmail.com';
-                      }
-                      _sendOtp();
-                    },
-              icon: const Icon(Icons.account_circle_outlined),
-              label: const Text('Use Google account'),
-            ),
-          ],
+          const SizedBox(height: 8),
+          OutlinedButton(
+            onPressed: loading ? null : onRegister,
+            child: const Text('Register'),
+          ),
+          TextButton(
+            onPressed: loading ? null : onForgotPassword,
+            child: const Text('Forget password'),
+          ),
         ],
       ),
     );
   }
-
-  void _sendOtp() {
-    final identity = _identity.trim();
-    if (identity.isEmpty) {
-      _showSnack(
-        context,
-        widget.mode == LoginMode.google
-            ? 'Enter your Google email first.'
-            : 'Enter your WhatsApp number first.',
-      );
-      return;
-    }
-    setState(() {
-      _otpSent = true;
-      _otpController.text = '123456';
-    });
-    _showSnack(context, 'OTP sent. Use 123456 for this test build.');
-  }
-
-  Future<void> _verify() async {
-    if (_otpController.text.trim() != '123456') {
-      _showSnack(context, 'Invalid OTP.');
-      return;
-    }
-    setState(() => _loading = true);
-    try {
-      final email = _loginEmail;
-      final password = _loginPassword;
-      final name = _nameController.text.trim().ifEmpty('Matjari User');
-      AuthSession session;
-      try {
-        session = await widget.api.login(email: email, password: password);
-      } catch (_) {
-        session = await widget.api.register(
-          email: email,
-          password: password,
-          fullName: name,
-        );
-      }
-      widget.onSessionChanged(session);
-      if (mounted) _showSnack(context, 'Welcome ${session.name}.');
-    } catch (error) {
-      if (mounted) _showSnack(context, error.toString());
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  String get _identity => widget.mode == LoginMode.google
-      ? _emailController.text
-      : _phoneController.text;
-
-  String get _loginEmail {
-    if (widget.mode == LoginMode.google) {
-      return _emailController.text.trim().toLowerCase();
-    }
-    final digits = _phoneController.text.replaceAll(RegExp(r'[^0-9]'), '');
-    return '${digits.ifEmpty('user')}@whatsapp.matjari.local';
-  }
-
-  String get _loginPassword {
-    final source = widget.mode == LoginMode.google
-        ? _emailController.text.trim().toLowerCase()
-        : _phoneController.text.replaceAll(RegExp(r'[^0-9]'), '');
-    return 'otp-${source.ifEmpty('matjari')}';
-  }
 }
 
-class AdminAuthPanel extends StatefulWidget {
-  const AdminAuthPanel({
-    super.key,
-    required this.api,
-    required this.onSessionChanged,
+class _OtpCard extends StatefulWidget {
+  const _OtpCard({
+    required this.destination,
+    required this.loading,
+    required this.onVerify,
+    required this.onBack,
   });
 
-  final MatjariApi api;
-  final ValueChanged<AuthSession> onSessionChanged;
+  final String destination;
+  final bool loading;
+  final ValueChanged<String> onVerify;
+  final VoidCallback onBack;
 
   @override
-  State<AdminAuthPanel> createState() => _AdminAuthPanelState();
+  State<_OtpCard> createState() => _OtpCardState();
 }
 
-class _AdminAuthPanelState extends State<AdminAuthPanel> {
-  final _usernameController = TextEditingController(text: 'admin');
-  final _passwordController = TextEditingController(text: '123456');
-  bool _loading = false;
+class _OtpCardState extends State<_OtpCard> {
+  final _otpController = TextEditingController();
 
   @override
   void dispose() {
-    _usernameController.dispose();
-    _passwordController.dispose();
+    _otpController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: const Color(0xFFF7F9FC),
+        color: Colors.white,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: _line),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x12000000),
+            blurRadius: 22,
+            offset: Offset(0, 10),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          IconButton(
+            alignment: Alignment.centerLeft,
+            onPressed: widget.onBack,
+            icon: const Icon(Icons.arrow_back),
+          ),
           const Text(
-            'Admin access',
-            style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
+            'OTP verification',
+            style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900),
           ),
           const SizedBox(height: 6),
-          const Text('Default credentials: admin / 123456'),
-          const SizedBox(height: 16),
-          TextField(
-            controller: _usernameController,
-            decoration: const InputDecoration(labelText: 'Admin username'),
+          Text(
+            'Enter the OTP you received for ${widget.destination}.',
+            style: const TextStyle(color: _muted),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 18),
           TextField(
-            controller: _passwordController,
-            obscureText: true,
-            decoration: const InputDecoration(labelText: 'Password'),
+            controller: _otpController,
+            keyboardType: TextInputType.number,
+            textInputAction: TextInputAction.done,
+            onSubmitted: widget.onVerify,
+            decoration: const InputDecoration(
+              labelText: 'OTP code',
+              prefixIcon: Icon(Icons.password_outlined),
+            ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 18),
           FilledButton.icon(
-            onPressed: _loading ? null : _login,
-            icon: const Icon(Icons.admin_panel_settings_outlined),
-            label: Text(_loading ? 'Please wait' : 'Enter admin dashboard'),
+            onPressed: widget.loading
+                ? null
+                : () => widget.onVerify(_otpController.text),
+            icon: const Icon(Icons.verified_user_outlined),
+            label: Text(widget.loading ? 'Please wait' : 'Verify'),
           ),
         ],
       ),
     );
-  }
-
-  Future<void> _login() async {
-    setState(() => _loading = true);
-    try {
-      final session = await widget.api.adminLogin(
-        username: _usernameController.text.trim().ifEmpty('admin'),
-        password: _passwordController.text,
-      );
-      widget.onSessionChanged(session);
-      if (mounted) _showSnack(context, 'Admin signed in.');
-    } catch (error) {
-      if (mounted) _showSnack(context, error.toString());
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
   }
 }
 

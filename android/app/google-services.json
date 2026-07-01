@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "735012231770",
+    "project_id": "matjarifirebase001",
+    "storage_bucket": "matjarifirebase001.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:735012231770:android:c6f22e76e3c609b3885663",
+        "android_client_info": {
+          "package_name": "com.matjari.matjari"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "735012231770-l8u76g2eiltsvo4jlr0v73g5maf0isnv.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.matjari.matjari",
+            "certificate_hash": "8e2bba9c0697ba17710f36b81a598f1de6d52a26"
+          }
+        },
+        {
+          "client_id": "735012231770-h9j6fak8ab464q9hbdo4bq33gvi0cp3g.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDhzQe2Wtj5GjWBOsICu6UbTrh0l9qL_CE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "735012231770-h9j6fak8ab464q9hbdo4bq33gvi0cp3g.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "735012231770-12ddo8p5ulu5vvoijb6k8m1vgvme9b64.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.matjari.matjari"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
