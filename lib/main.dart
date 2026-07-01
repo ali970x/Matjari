@@ -615,14 +615,15 @@ List<String> _lines(String value) {
       .toList();
 }
 
-Future<bool> _openExternalUrl(String url) async {
+Future<bool> _downloadAndInstallApk(String url, String fileName) async {
   final uri = Uri.tryParse(url);
   if (uri == null || !uri.hasScheme) return false;
   if (!_canUseAndroidPackageBridge) return false;
 
   try {
-    return await _nativeChannel.invokeMethod<bool>('openUrl', {
+    return await _nativeChannel.invokeMethod<bool>('downloadAndInstallApk', {
           'url': uri.toString(),
+          'fileName': fileName,
         }) ??
         false;
   } on MissingPluginException {
@@ -1127,14 +1128,17 @@ class _MatjariShellState extends State<MatjariShell>
     required bool updating,
   }) async {
     final url = item.fileUrl?.trim() ?? '';
-    final opened = url.isNotEmpty && await _openExternalUrl(url);
+    final opened =
+        url.isNotEmpty && await _downloadAndInstallApk(url, item.name);
     if (!mounted) return;
 
     _showSnack(
       context,
       opened
-          ? '${updating ? 'Update' : 'Download'} opened for ${item.name}.'
-          : '${updating ? 'Updated' : 'Installed'} ${item.name}.',
+          ? 'Installer opened for ${item.name}.'
+          : url.isEmpty
+          ? 'No APK URL for ${item.name}.'
+          : 'Could not open installer for ${item.name}.',
     );
   }
 

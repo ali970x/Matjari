@@ -6,10 +6,13 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.OpenableColumns
+import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -23,7 +26,11 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "matjari/native")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
-                    "openUrl" -> result.success(openUrl(call.argument("url")))
+                    "downloadAndInstallApk" -> downloadAndInstallApk(
+                        url = call.argument("url"),
+                        fileName = call.argument("fileName"),
+                        result = result,
+                    )
                     "openPackage" -> result.success(openPackage(call.argument("packageName")))
                     "installedVersionCode" -> result.success(installedVersionCode(call.argument("packageName")))
                     "pickAndUpload" -> pickAndUpload(
@@ -81,17 +88,27 @@ class MainActivity : FlutterActivity() {
         }.start()
     }
 
-    private fun openUrl(url: String?): Boolean {
-        if (url.isNullOrBlank()) return false
-
-        return try {
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-            true
-        } catch (_: ActivityNotFoundException) {
-            false
-        } catch (_: Exception) {
-            false
+    private fun downloadAndInstallApk(
+        url: String?,
+        fileName: String?,
+        result: MethodChannel.Result,
+    ) {
+        if (url.isNullOrBlank()) {
+            result.error("BAD_URL", "APK URL is required", null)
+            return
         }
+
+        Thread {
+            try {
+                val apkFile = downloadApk(url, fileName)
+                val opened = openApkInstaller(apkFile)
+                runOnUiThread { result.success(opened) }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    result.error("DOWNLOAD_FAILED", error.message ?: "APK download failed", null)
+                }
+            }
+        }.start()
     }
 
     private fun openPackage(packageName: String?): Boolean {
@@ -203,6 +220,72 @@ class MainActivity : FlutterActivity() {
         return response
     }
 
+    private fun downloadApk(url: String, fileName: String?): File {
+        val downloadsDir = File(cacheDir, "downloads").apply {
+            mkdirs()
+        }
+        downloadsDir.listFiles()?.forEach { file ->
+            if (file.name.endsWith(".apk")) file.delete()
+        }
+
+        val safeName = safeApkName(fileName)
+        val apkFile = File(downloadsDir, "${System.currentTimeMillis()}-$safeName")
+        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 60000
+            readTimeout = 180000
+            instanceFollowRedirects = true
+            setRequestProperty("User-Agent", "Matjari Android")
+        }
+
+        val status = connection.responseCode
+        if (status !in 200..299) {
+            val error = connection.errorStream?.bufferedReader()?.use { it.readText() }
+            throw IllegalStateException(error?.ifBlank { null } ?: "Download failed with HTTP $status")
+        }
+
+        connection.inputStream.use { input ->
+            FileOutputStream(apkFile).use { output ->
+                input.copyTo(output)
+            }
+        }
+
+        if (apkFile.length() <= 0L) {
+            throw IllegalStateException("Downloaded APK is empty")
+        }
+
+        return apkFile
+    }
+
+    private fun openApkInstaller(apkFile: File): Boolean {
+        val uri = FileProvider.getUriForFile(
+            this,
+            "${applicationContext.packageName}.fileprovider",
+            apkFile,
+        )
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, APK_MIME_TYPE)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        return try {
+            startActivity(intent)
+            true
+        } catch (_: ActivityNotFoundException) {
+            false
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun safeApkName(fileName: String?): String {
+        val rawName = fileName
+            ?.takeIf { it.isNotBlank() }
+            ?.replace(Regex("[^A-Za-z0-9._-]"), "-")
+            ?: "matjari-app.apk"
+        return if (rawName.endsWith(".apk", ignoreCase = true)) rawName else "$rawName.apk"
+    }
+
     private fun displayName(uri: Uri): String {
         contentResolver.query(uri, null, null, null, null)?.use { cursor ->
             val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
@@ -221,5 +304,6 @@ class MainActivity : FlutterActivity() {
 
     companion object {
         private const val PICK_UPLOAD_REQUEST = 9401
+        private const val APK_MIME_TYPE = "application/vnd.android.package-archive"
     }
 }
