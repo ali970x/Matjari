@@ -178,6 +178,30 @@ class InstalledPackageMatch {
   final int versionCode;
 }
 
+class AdminUploadFile {
+  const AdminUploadFile({
+    required this.url,
+    this.sizeBytes,
+    this.packageName,
+    this.versionCode,
+    this.versionName,
+  });
+
+  final String url;
+  final int? sizeBytes;
+  final String? packageName;
+  final int? versionCode;
+  final String? versionName;
+
+  String? get displaySize {
+    final bytes = sizeBytes;
+    if (bytes == null || bytes <= 0) return null;
+    final mb = bytes / (1024 * 1024);
+    if (mb >= 10) return '${mb.round()} MB';
+    return '${mb.toStringAsFixed(1)} MB';
+  }
+}
+
 class StoreCategory {
   const StoreCategory({
     required this.id,
@@ -762,7 +786,7 @@ Future<void> _rememberPackageAlias(String key, String packageName) async {
   }
 }
 
-Future<List<String>> _pickAndUploadAdminFile({
+Future<List<AdminUploadFile>> _pickAndUploadAdminFile({
   required String endpoint,
   required String token,
   required String fieldName,
@@ -773,13 +797,20 @@ Future<List<String>> _pickAndUploadAdminFile({
     throw Exception('File upload is available on Android only.');
   }
 
-  final response = await _nativeChannel.invokeMethod<String?>('pickAndUpload', {
-    'endpoint': '$_apiBaseUrl$endpoint',
-    'token': token,
-    'fieldName': fieldName,
-    'mimeType': mimeType,
-    'allowMultiple': allowMultiple,
-  });
+  final uploadResult = await _nativeChannel
+      .invokeMethod<Object?>('pickAndUpload', {
+        'endpoint': '$_apiBaseUrl$endpoint',
+        'token': token,
+        'fieldName': fieldName,
+        'mimeType': mimeType,
+        'allowMultiple': allowMultiple,
+      });
+  final resultMap = uploadResult is Map
+      ? Map<Object?, Object?>.from(uploadResult)
+      : const <Object?, Object?>{};
+  final response = uploadResult is String
+      ? uploadResult
+      : _stringValue(resultMap['response']);
   if (response == null || response.isEmpty) return [];
 
   final decoded = jsonDecode(response);
@@ -787,13 +818,31 @@ Future<List<String>> _pickAndUploadAdminFile({
       ? decoded
       : <String, dynamic>{};
   final files = payload['files'] is List ? payload['files'] as List : const [];
+  final selectedFiles = resultMap['selectedFiles'] is List
+      ? resultMap['selectedFiles'] as List
+      : const [];
 
-  return files
-      .whereType<Map>()
-      .map((file) => _stringValue(file['url']))
-      .whereType<String>()
-      .where((url) => url.isNotEmpty)
-      .toList();
+  final uploads = <AdminUploadFile>[];
+  for (var index = 0; index < files.length; index += 1) {
+    final file = files[index];
+    if (file is! Map) continue;
+    final url = _stringValue(file['url']);
+    if (url == null || url.isEmpty) continue;
+    final selected = index < selectedFiles.length && selectedFiles[index] is Map
+        ? Map<Object?, Object?>.from(selectedFiles[index] as Map)
+        : const <Object?, Object?>{};
+    uploads.add(
+      AdminUploadFile(
+        url: url,
+        sizeBytes: _intValue(file['size']) ?? _intValue(selected['size']),
+        packageName: _stringValue(selected['packageName']),
+        versionCode: _intValue(selected['versionCode']),
+        versionName: _stringValue(selected['versionName']),
+      ),
+    );
+  }
+
+  return uploads;
 }
 
 bool get _canUseAndroidPackageBridge {
@@ -4526,14 +4575,22 @@ void _showUpdateSheet(
                   : () async {
                       setSheetState(() => uploadingFile = true);
                       try {
-                        final urls = await _pickAndUploadAdminFile(
+                        final uploads = await _pickAndUploadAdminFile(
                           endpoint: '/api/uploads/app-file',
                           token: session.token,
                           fieldName: 'file',
                           mimeType: 'application/vnd.android.package-archive',
                         );
-                        if (urls.isNotEmpty) {
-                          fileUrlController.text = urls.first;
+                        if (uploads.isNotEmpty) {
+                          final upload = uploads.first;
+                          fileUrlController.text = upload.url;
+                          if (upload.versionName != null) {
+                            versionController.text = upload.versionName!;
+                          }
+                          if (upload.versionCode != null) {
+                            versionCodeController.text =
+                                '${upload.versionCode}';
+                          }
                           if (context.mounted) {
                             _showSnack(context, 'APK uploaded.');
                           }
@@ -4719,14 +4776,14 @@ void _showEditSheet(
                   : () async {
                       setSheetState(() => uploadingIcon = true);
                       try {
-                        final urls = await _pickAndUploadAdminFile(
+                        final uploads = await _pickAndUploadAdminFile(
                           endpoint: '/api/uploads/icon',
                           token: session.token,
                           fieldName: 'icon',
                           mimeType: 'image/*',
                         );
-                        if (urls.isNotEmpty) {
-                          iconUrlController.text = urls.first;
+                        if (uploads.isNotEmpty) {
+                          iconUrlController.text = uploads.first.url;
                           if (context.mounted) {
                             _showSnack(context, 'Icon uploaded.');
                           }
@@ -4756,14 +4813,28 @@ void _showEditSheet(
                   : () async {
                       setSheetState(() => uploadingFile = true);
                       try {
-                        final urls = await _pickAndUploadAdminFile(
+                        final uploads = await _pickAndUploadAdminFile(
                           endpoint: '/api/uploads/app-file',
                           token: session.token,
                           fieldName: 'file',
                           mimeType: 'application/vnd.android.package-archive',
                         );
-                        if (urls.isNotEmpty) {
-                          fileUrlController.text = urls.first;
+                        if (uploads.isNotEmpty) {
+                          final upload = uploads.first;
+                          fileUrlController.text = upload.url;
+                          if (upload.packageName != null) {
+                            packageController.text = upload.packageName!;
+                          }
+                          if (upload.versionName != null) {
+                            versionController.text = upload.versionName!;
+                          }
+                          if (upload.versionCode != null) {
+                            versionCodeController.text =
+                                '${upload.versionCode}';
+                          }
+                          if (upload.displaySize != null) {
+                            sizeController.text = upload.displaySize!;
+                          }
                           if (context.mounted) {
                             _showSnack(context, 'APK uploaded.');
                           }
@@ -4798,14 +4869,15 @@ void _showEditSheet(
                   : () async {
                       setSheetState(() => uploadingScreenshots = true);
                       try {
-                        final urls = await _pickAndUploadAdminFile(
+                        final uploads = await _pickAndUploadAdminFile(
                           endpoint: '/api/uploads/screenshots',
                           token: session.token,
                           fieldName: 'screenshots',
                           mimeType: 'image/*',
                           allowMultiple: true,
                         );
-                        if (urls.isNotEmpty) {
+                        if (uploads.isNotEmpty) {
+                          final urls = uploads.map((upload) => upload.url);
                           final current = screenshotsController.text.trim();
                           screenshotsController.text = [
                             if (current.isNotEmpty) current,

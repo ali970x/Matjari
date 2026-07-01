@@ -93,8 +93,16 @@ class MainActivity : FlutterActivity() {
 
         Thread {
             try {
+                val selectedFiles = selectedUploadFiles(uris)
                 val response = uploadMultipart(args, uris)
-                runOnUiThread { result.success(response) }
+                runOnUiThread {
+                    result.success(
+                        mapOf(
+                            "response" to response,
+                            "selectedFiles" to selectedFiles,
+                        ),
+                    )
+                }
             } catch (error: Exception) {
                 runOnUiThread {
                     result.error("UPLOAD_FAILED", error.message ?: "Upload failed", null)
@@ -328,6 +336,50 @@ class MainActivity : FlutterActivity() {
         return response
     }
 
+    private fun selectedUploadFiles(uris: List<Uri>): List<Map<String, Any?>> {
+        return uris.map { uri ->
+            val name = displayName(uri)
+            val size = uploadFileSize(uri)
+            val packageInfo = if (name.endsWith(".apk", ignoreCase = true)) {
+                inspectContentApk(uri, name)
+            } else {
+                null
+            }
+            mapOf(
+                "originalName" to name,
+                "size" to size,
+                "packageName" to packageInfo?.packageName,
+                "versionCode" to packageInfo?.versionCode,
+                "versionName" to packageInfo?.versionName,
+            )
+        }
+    }
+
+    private fun uploadFileSize(uri: Uri): Long? {
+        contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            val index = cursor.getColumnIndex(OpenableColumns.SIZE)
+            if (index >= 0 && cursor.moveToFirst() && !cursor.isNull(index)) {
+                return cursor.getLong(index)
+            }
+        }
+        return null
+    }
+
+    private fun inspectContentApk(uri: Uri, fileName: String): ApkPackageInfo? {
+        val safeName = safeApkName(fileName)
+        val inspectDir = File(cacheDir, "upload-inspect").apply {
+            mkdirs()
+        }
+        inspectDir.listFiles()?.forEach { file -> file.delete() }
+        val apkFile = File(inspectDir, safeName)
+        contentResolver.openInputStream(uri)?.use { input ->
+            FileOutputStream(apkFile).use { output ->
+                input.copyTo(output)
+            }
+        } ?: return null
+        return readApkPackageInfo(apkFile)
+    }
+
     private fun downloadApk(url: String, fileName: String?, downloadId: String?): File {
         val downloadsDir = File(cacheDir, "downloads").apply {
             mkdirs()
@@ -391,7 +443,7 @@ class MainActivity : FlutterActivity() {
         } else {
             info.versionCode.toLong()
         }
-        return ApkPackageInfo(info.packageName, versionCode)
+        return ApkPackageInfo(info.packageName, versionCode, info.versionName)
     }
 
     private fun sendDownloadProgress(downloadId: String?, downloadedBytes: Long, totalBytes: Long) {
@@ -464,6 +516,7 @@ class MainActivity : FlutterActivity() {
     data class ApkPackageInfo(
         val packageName: String,
         val versionCode: Long,
+        val versionName: String?,
     )
 
     data class ResolvedInstalledApp(
