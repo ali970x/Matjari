@@ -61,6 +61,8 @@ async function seedIfNeeded() {
       email: 'admin@matjari.local',
       username: env.adminUsername,
       full_name: 'Matjari Admin',
+      phone_number: '+96100000000',
+      avatar_url: '',
       password_hash: await bcrypt.hash(env.adminPassword, 10),
       role: 'admin',
       created_at: now(),

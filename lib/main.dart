@@ -4,7 +4,9 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:firebase_core/firebase_core.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:http/http.dart' as http;
 
 import 'firebase_options.dart';
@@ -21,8 +23,8 @@ const _ink = Color(0xFF202124);
 const _muted = Color(0xFF5F6368);
 const _line = Color(0xFFE0E3E7);
 const _surface = Color(0xFFF7F9FC);
-const _appVersionName = '1.1.1';
-const _appBuildNumber = 3;
+const _appVersionName = '1.1.2';
+const _appBuildNumber = 4;
 const _whatsAppOtpEndpoint =
     'https://whatsapp-server1-production-72d1.up.railway.app/api/whatsapp/send-message';
 const _apiBaseUrl = String.fromEnvironment(
@@ -211,6 +213,36 @@ class AdminUploadFile {
   }
 }
 
+class RegisterFormData {
+  const RegisterFormData({
+    required this.email,
+    required this.username,
+    required this.phoneNumber,
+    required this.fullName,
+    required this.password,
+    required this.avatarUrl,
+  });
+
+  final String email;
+  final String username;
+  final String phoneNumber;
+  final String fullName;
+  final String password;
+  final String avatarUrl;
+}
+
+class GoogleProfile {
+  const GoogleProfile({
+    required this.email,
+    required this.name,
+    required this.avatarUrl,
+  });
+
+  final String email;
+  final String name;
+  final String avatarUrl;
+}
+
 class StoreCategory {
   const StoreCategory({
     required this.id,
@@ -260,12 +292,18 @@ class AuthSession {
     required this.role,
     required this.name,
     required this.email,
+    required this.username,
+    required this.phoneNumber,
+    required this.avatarUrl,
   });
 
   final String token;
   final String role;
   final String name;
   final String email;
+  final String username;
+  final String phoneNumber;
+  final String avatarUrl;
 }
 
 typedef StoreItemLabelBuilder = String Function(StoreItem item);
@@ -339,10 +377,12 @@ class MatjariApi {
 
   Future<AuthSession> login({
     required String email,
+    String? identifier,
     required String password,
   }) async {
     final payload = await _post('/api/auth/login', {
       'email': email,
+      'identifier': identifier ?? email,
       'password': password,
     });
     return _sessionFromPayload(payload);
@@ -352,13 +392,31 @@ class MatjariApi {
     required String email,
     required String password,
     required String fullName,
+    String? username,
+    String? phoneNumber,
+    String? avatarUrl,
   }) async {
-    final payload = await _post('/api/auth/register', {
-      'email': email,
-      'password': password,
-      'full_name': fullName,
-    });
+    final body = {'email': email, 'password': password, 'full_name': fullName};
+    if (username != null) body['username'] = username;
+    if (phoneNumber != null) body['phone_number'] = phoneNumber;
+    if (avatarUrl != null) body['avatar_url'] = avatarUrl;
+    final payload = await _post('/api/auth/register', body);
     return _sessionFromPayload(payload);
+  }
+
+  Future<Map<String, dynamic>> googleLogin({
+    required String email,
+    String? fullName,
+    String? username,
+    String? phoneNumber,
+    String? avatarUrl,
+  }) async {
+    final body = {'email': email};
+    if (fullName != null) body['full_name'] = fullName;
+    if (username != null) body['username'] = username;
+    if (phoneNumber != null) body['phone_number'] = phoneNumber;
+    if (avatarUrl != null) body['avatar_url'] = avatarUrl;
+    return _post('/api/auth/google-login', body);
   }
 
   Future<bool> sendWhatsAppOtp({
@@ -589,7 +647,7 @@ class MatjariApi {
     return payload;
   }
 
-  AuthSession _sessionFromPayload(Map<String, dynamic> payload) {
+  AuthSession sessionFromPayload(Map<String, dynamic> payload) {
     final user = payload['user'] is Map<String, dynamic>
         ? payload['user'] as Map<String, dynamic>
         : <String, dynamic>{};
@@ -601,7 +659,14 @@ class MatjariApi {
           _stringValue(user['username']) ??
           'User',
       email: _stringValue(user['email']) ?? '',
+      username: _stringValue(user['username']) ?? '',
+      phoneNumber: _stringValue(user['phone_number']) ?? '',
+      avatarUrl: _stringValue(user['avatar_url']) ?? '',
     );
+  }
+
+  AuthSession _sessionFromPayload(Map<String, dynamic> payload) {
+    return sessionFromPayload(payload);
   }
 }
 
@@ -619,6 +684,11 @@ String? _stringValue(Object? value) {
   if (value == null) return null;
   final text = value.toString().trim();
   return text.isEmpty ? null : text;
+}
+
+String avatarForEmail(String email) {
+  final label = Uri.encodeComponent(email.split('@').first.ifEmpty('User'));
+  return 'https://ui-avatars.com/api/?name=$label&background=1769D2&color=fff&bold=true';
 }
 
 String? _absoluteApiUrl(String? value) {
@@ -1109,6 +1179,8 @@ class _AuthGatePageState extends State<AuthGatePage> {
   String? _pendingOtp;
   AuthSession? _pendingSession;
   String _pendingDestination = '';
+  GoogleProfile? _googleRegistrationProfile;
+  bool _registerMode = false;
   bool _loading = false;
 
   @override
@@ -1152,16 +1224,7 @@ class _AuthGatePageState extends State<AuthGatePage> {
               ),
             ),
             const SizedBox(height: 30),
-            if (_pendingSession == null)
-              _LoginCard(
-                identifierController: _identifierController,
-                passwordController: _passwordController,
-                loading: _loading,
-                onLogin: _login,
-                onRegister: _register,
-                onForgotPassword: _forgotPassword,
-              )
-            else
+            if (_pendingSession != null)
               _OtpCard(
                 destination: _pendingDestination,
                 loading: _loading,
@@ -1171,6 +1234,26 @@ class _AuthGatePageState extends State<AuthGatePage> {
                   _pendingOtp = null;
                   _pendingDestination = '';
                 }),
+              )
+            else if (_registerMode)
+              _RegisterCard(
+                initialProfile: _googleRegistrationProfile,
+                loading: _loading,
+                onRegister: _completeRegistration,
+                onBackToLogin: () => setState(() {
+                  _registerMode = false;
+                  _googleRegistrationProfile = null;
+                }),
+              )
+            else
+              _LoginCard(
+                identifierController: _identifierController,
+                passwordController: _passwordController,
+                loading: _loading,
+                onLogin: _login,
+                onRegister: () => setState(() => _registerMode = true),
+                onGoogle: _loginByGoogle,
+                onForgotPassword: _forgotPassword,
               ),
             const SizedBox(height: 22),
             const Text(
@@ -1194,7 +1277,7 @@ class _AuthGatePageState extends State<AuthGatePage> {
     setState(() => _loading = true);
     try {
       final session = await _authenticate(identifier, password);
-      await _beginOtp(session, identifier);
+      await _beginOtp(session);
     } catch (error) {
       if (mounted) _showSnack(context, error.toString());
     } finally {
@@ -1202,22 +1285,18 @@ class _AuthGatePageState extends State<AuthGatePage> {
     }
   }
 
-  Future<void> _register() async {
-    final identifier = _identifierController.text.trim();
-    final password = _passwordController.text;
-    if (!identifier.contains('@') || password.length < 6) {
-      _showSnack(context, 'Use a valid email and a 6+ character password.');
-      return;
-    }
+  Future<void> _completeRegistration(RegisterFormData data) async {
     setState(() => _loading = true);
     try {
-      final name = identifier.split('@').first.ifEmpty('Matjari User');
       final session = await widget.api.register(
-        email: identifier.toLowerCase(),
-        password: password,
-        fullName: name,
+        email: data.email,
+        password: data.password,
+        fullName: data.fullName,
+        username: data.username,
+        phoneNumber: data.phoneNumber,
+        avatarUrl: data.avatarUrl,
       );
-      await _beginOtp(session, identifier);
+      await _beginOtp(session);
     } catch (error) {
       if (mounted) _showSnack(context, error.toString());
     } finally {
@@ -1232,6 +1311,7 @@ class _AuthGatePageState extends State<AuthGatePage> {
     try {
       return await widget.api.login(
         email: identifier.toLowerCase(),
+        identifier: identifier,
         password: password,
       );
     } catch (error) {
@@ -1240,13 +1320,65 @@ class _AuthGatePageState extends State<AuthGatePage> {
     }
   }
 
-  Future<void> _beginOtp(AuthSession session, String destination) async {
+  Future<void> _loginByGoogle() async {
+    setState(() => _loading = true);
+    try {
+      final profile = await _googleProfile();
+      if (profile == null) return;
+      final payload = await widget.api.googleLogin(
+        email: profile.email,
+        fullName: profile.name,
+        avatarUrl: profile.avatarUrl,
+      );
+      if (payload['needs_registration'] == true) {
+        if (!mounted) return;
+        setState(() {
+          _googleRegistrationProfile = profile;
+          _registerMode = true;
+        });
+        _showSnack(context, 'Complete your phone number and password.');
+        return;
+      }
+      final session = widget.api.sessionFromPayload(payload);
+      await _beginOtp(session);
+    } catch (error) {
+      if (mounted) _showSnack(context, error.toString());
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<GoogleProfile?> _googleProfile() async {
+    try {
+      final google = GoogleSignIn.instance;
+      await google.initialize();
+      final account = await google.authenticate();
+      final auth = account.authentication;
+      final credential = firebase_auth.GoogleAuthProvider.credential(
+        idToken: auth.idToken,
+      );
+      await firebase_auth.FirebaseAuth.instance.signInWithCredential(
+        credential,
+      );
+      return GoogleProfile(
+        email: account.email,
+        name: account.displayName ?? account.email.split('@').first,
+        avatarUrl: account.photoUrl ?? avatarForEmail(account.email),
+      );
+    } catch (error) {
+      if (mounted) _showSnack(context, 'Google login failed: $error');
+      return null;
+    }
+  }
+
+  Future<void> _beginOtp(AuthSession session) async {
     final otp = _generateOtp();
     final message = 'Matjari OTP: $otp';
     var sent = false;
-    if (_looksLikePhone(destination)) {
+    final destination = session.phoneNumber.ifEmpty(session.email);
+    if (_looksLikePhone(session.phoneNumber)) {
       sent = await widget.api.sendWhatsAppOtp(
-        numberphone: destination,
+        numberphone: session.phoneNumber,
         message: message,
       );
     }
@@ -1260,7 +1392,7 @@ class _AuthGatePageState extends State<AuthGatePage> {
       context,
       sent
           ? 'OTP sent on WhatsApp.'
-          : 'OTP ready for testing: $otp. Add a WhatsApp number to send it.',
+          : 'OTP ready for testing: $otp. Add a valid WhatsApp number to send it.',
     );
   }
 
@@ -1300,6 +1432,7 @@ class _LoginCard extends StatelessWidget {
     required this.loading,
     required this.onLogin,
     required this.onRegister,
+    required this.onGoogle,
     required this.onForgotPassword,
   });
 
@@ -1308,6 +1441,7 @@ class _LoginCard extends StatelessWidget {
   final bool loading;
   final VoidCallback onLogin;
   final VoidCallback onRegister;
+  final VoidCallback onGoogle;
   final VoidCallback onForgotPassword;
 
   @override
@@ -1344,7 +1478,7 @@ class _LoginCard extends StatelessWidget {
             keyboardType: TextInputType.emailAddress,
             textInputAction: TextInputAction.next,
             decoration: const InputDecoration(
-              labelText: 'Enter your mail',
+              labelText: 'Email or username',
               prefixIcon: Icon(Icons.mail_outline),
             ),
           ),
@@ -1365,6 +1499,12 @@ class _LoginCard extends StatelessWidget {
             label: Text(loading ? 'Please wait' : 'Login'),
           ),
           const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: loading ? null : onGoogle,
+            icon: const Icon(Icons.account_circle_outlined),
+            label: const Text('Login by Google'),
+          ),
+          const SizedBox(height: 8),
           OutlinedButton(
             onPressed: loading ? null : onRegister,
             child: const Text('Register'),
@@ -1376,6 +1516,249 @@ class _LoginCard extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+class _RegisterCard extends StatefulWidget {
+  const _RegisterCard({
+    this.initialProfile,
+    required this.loading,
+    required this.onRegister,
+    required this.onBackToLogin,
+  });
+
+  final GoogleProfile? initialProfile;
+  final bool loading;
+  final ValueChanged<RegisterFormData> onRegister;
+  final VoidCallback onBackToLogin;
+
+  @override
+  State<_RegisterCard> createState() => _RegisterCardState();
+}
+
+class _RegisterCardState extends State<_RegisterCard> {
+  final _emailController = TextEditingController();
+  final _usernameController = TextEditingController();
+  final _phoneController = TextEditingController();
+  final _nameController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _confirmController = TextEditingController();
+  final _avatarController = TextEditingController();
+  String _countryCode = '+961';
+
+  @override
+  void initState() {
+    super.initState();
+    final profile = widget.initialProfile;
+    if (profile != null) {
+      _emailController.text = profile.email;
+      _nameController.text = profile.name;
+      _usernameController.text = profile.email.split('@').first.toLowerCase();
+      _avatarController.text = profile.avatarUrl;
+    }
+    _emailController.addListener(_syncAvatarAndUsername);
+  }
+
+  @override
+  void dispose() {
+    _emailController.removeListener(_syncAvatarAndUsername);
+    _emailController.dispose();
+    _usernameController.dispose();
+    _phoneController.dispose();
+    _nameController.dispose();
+    _passwordController.dispose();
+    _confirmController.dispose();
+    _avatarController.dispose();
+    super.dispose();
+  }
+
+  void _syncAvatarAndUsername() {
+    final email = _emailController.text.trim();
+    if (email.isEmpty) return;
+    if (_avatarController.text.trim().isEmpty) {
+      _avatarController.text = avatarForEmail(email);
+    }
+    if (_usernameController.text.trim().isEmpty && email.contains('@')) {
+      _usernameController.text = email.split('@').first.toLowerCase();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final avatar = _avatarController.text.trim();
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: _line),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x12000000),
+            blurRadius: 22,
+            offset: Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              IconButton(
+                tooltip: 'Back to login',
+                onPressed: widget.onBackToLogin,
+                icon: const Icon(Icons.arrow_back),
+              ),
+              const Expanded(
+                child: Text(
+                  'Create account',
+                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Center(
+            child: CircleAvatar(
+              radius: 42,
+              backgroundColor: _brandBlue,
+              backgroundImage: avatar.isEmpty ? null : NetworkImage(avatar),
+              child: avatar.isEmpty
+                  ? const Icon(Icons.person, color: Colors.white, size: 42)
+                  : null,
+            ),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _emailController,
+            keyboardType: TextInputType.emailAddress,
+            decoration: const InputDecoration(
+              labelText: 'Email',
+              prefixIcon: Icon(Icons.mail_outline),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _usernameController,
+            decoration: const InputDecoration(
+              labelText: 'Username',
+              prefixIcon: Icon(Icons.alternate_email),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              SizedBox(
+                width: 104,
+                child: DropdownButtonFormField<String>(
+                  initialValue: _countryCode,
+                  decoration: const InputDecoration(labelText: 'Code'),
+                  items: const [
+                    DropdownMenuItem(value: '+961', child: Text('LB +961')),
+                    DropdownMenuItem(value: '+1', child: Text('US +1')),
+                    DropdownMenuItem(value: '+971', child: Text('AE +971')),
+                    DropdownMenuItem(value: '+966', child: Text('SA +966')),
+                    DropdownMenuItem(value: '+20', child: Text('EG +20')),
+                  ],
+                  onChanged: (value) =>
+                      setState(() => _countryCode = value ?? '+961'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: TextField(
+                  controller: _phoneController,
+                  keyboardType: TextInputType.phone,
+                  decoration: const InputDecoration(
+                    labelText: 'Phone number',
+                    prefixIcon: Icon(Icons.phone_outlined),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _nameController,
+            decoration: const InputDecoration(
+              labelText: 'Full name',
+              prefixIcon: Icon(Icons.badge_outlined),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _avatarController,
+            onChanged: (_) => setState(() {}),
+            decoration: const InputDecoration(
+              labelText: 'Profile image URL',
+              prefixIcon: Icon(Icons.image_outlined),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _passwordController,
+            obscureText: true,
+            decoration: const InputDecoration(
+              labelText: 'Password',
+              prefixIcon: Icon(Icons.lock_outline),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _confirmController,
+            obscureText: true,
+            decoration: const InputDecoration(
+              labelText: 'Confirm password',
+              prefixIcon: Icon(Icons.lock_reset),
+            ),
+          ),
+          const SizedBox(height: 18),
+          FilledButton.icon(
+            onPressed: widget.loading ? null : _submit,
+            icon: const Icon(Icons.person_add_alt_1),
+            label: Text(widget.loading ? 'Please wait' : 'Register'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _submit() {
+    final email = _emailController.text.trim().toLowerCase();
+    final username = _usernameController.text.trim().toLowerCase();
+    final phone = _normalizedPhone();
+    final name = _nameController.text.trim();
+    final password = _passwordController.text;
+    final confirm = _confirmController.text;
+    if (!email.contains('@') ||
+        username.isEmpty ||
+        phone.length < 8 ||
+        name.isEmpty) {
+      _showSnack(context, 'Complete email, username, phone, and name.');
+      return;
+    }
+    if (password.length < 6 || password != confirm) {
+      _showSnack(context, 'Passwords must match and be 6+ characters.');
+      return;
+    }
+    widget.onRegister(
+      RegisterFormData(
+        email: email,
+        username: username,
+        phoneNumber: phone,
+        fullName: name,
+        password: password,
+        avatarUrl: _avatarController.text.trim().ifEmpty(avatarForEmail(email)),
+      ),
+    );
+  }
+
+  String _normalizedPhone() {
+    final digits = _phoneController.text.replaceAll(RegExp(r'[^0-9]'), '');
+    final country = _countryCode.replaceAll(RegExp(r'[^0-9]'), '');
+    final local = digits.replaceFirst(RegExp(r'^0+'), '');
+    return '+$country$local';
   }
 }
 

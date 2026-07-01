@@ -6,18 +6,29 @@ const { signToken } = require('../utils/tokens');
 const env = require('../config/env');
 
 const register = asyncHandler(async (req, res) => {
-  const { email, password, full_name } = req.body;
-  if (!email || !password || !full_name) {
-    throw httpError(400, 'email, password, and full_name are required');
+  const { email, password, full_name, username, phone_number, avatar_url } = req.body;
+  if (!email || !password || !full_name || !phone_number) {
+    throw httpError(400, 'email, password, full_name, and phone_number are required');
   }
 
   const normalizedEmail = String(email).toLowerCase().trim();
-  const existing = store.findOne('users', (user) => user.email === normalizedEmail);
-  if (existing) throw httpError(409, 'Email is already registered');
+  const normalizedUsername = normalizeUsername(username || normalizedEmail.split('@')[0]);
+  const normalizedPhone = normalizePhone(phone_number);
+  const existing = store.findOne(
+    'users',
+    (user) =>
+      user.email === normalizedEmail ||
+      normalizeUsername(user.username) === normalizedUsername ||
+      normalizePhone(user.phone_number) === normalizedPhone,
+  );
+  if (existing) throw httpError(409, 'Email, username, or phone number is already registered');
 
   const user = await store.create('users', {
     email: normalizedEmail,
+    username: normalizedUsername,
     full_name: String(full_name).trim(),
+    phone_number: normalizedPhone,
+    avatar_url: String(avatar_url || '').trim(),
     password_hash: await bcrypt.hash(password, 10),
     role: 'user',
   });
@@ -26,12 +37,15 @@ const register = asyncHandler(async (req, res) => {
 });
 
 const login = asyncHandler(async (req, res) => {
-  const { email, password } = req.body;
-  if (!email || !password) throw httpError(400, 'email and password are required');
+  const { email, identifier, password } = req.body;
+  const loginId = String(identifier || email || '').toLowerCase().trim();
+  if (!loginId || !password) throw httpError(400, 'identifier and password are required');
 
   const user = store.findOne(
     'users',
-    (item) => item.email === String(email).toLowerCase().trim(),
+    (item) =>
+      item.email === loginId ||
+      normalizeUsername(item.username) === normalizeUsername(loginId),
   );
   await assertPassword(user, password);
 
@@ -55,6 +69,38 @@ const me = asyncHandler(async (req, res) => {
   res.json({ user: publicUser(req.user) });
 });
 
+const googleLogin = asyncHandler(async (req, res) => {
+  const { email, full_name, username, phone_number, avatar_url } = req.body;
+  if (!email) throw httpError(400, 'email is required');
+
+  const normalizedEmail = String(email).toLowerCase().trim();
+  let user = store.findOne('users', (item) => item.email === normalizedEmail);
+  if (!user) {
+    if (!phone_number || !full_name) {
+      return res.status(202).json({
+        needs_registration: true,
+        profile: {
+          email: normalizedEmail,
+          full_name: full_name || normalizedEmail.split('@')[0],
+          avatar_url: avatar_url || '',
+        },
+      });
+    }
+    user = await store.create('users', {
+      email: normalizedEmail,
+      username: normalizeUsername(username || normalizedEmail.split('@')[0]),
+      full_name: String(full_name).trim(),
+      phone_number: normalizePhone(phone_number),
+      avatar_url: String(avatar_url || '').trim(),
+      password_hash: await bcrypt.hash(randomGooglePassword(normalizedEmail), 10),
+      role: 'user',
+      auth_provider: 'google',
+    });
+  }
+
+  res.json({ user: publicUser(user), token: signToken(user) });
+});
+
 async function assertPassword(user, password) {
   if (!user) throw httpError(401, 'Invalid credentials');
   const matches = await bcrypt.compare(password, user.password_hash);
@@ -66,4 +112,20 @@ function publicUser(user) {
   return safeUser;
 }
 
-module.exports = { register, login, adminLogin, me, publicUser };
+function normalizeUsername(value = '') {
+  return String(value).toLowerCase().trim().replace(/[^a-z0-9._-]/g, '');
+}
+
+function normalizePhone(value = '') {
+  const text = String(value).trim();
+  if (text.startsWith('+')) return `+${text.replace(/[^0-9]/g, '')}`;
+  const digits = text.replace(/[^0-9]/g, '');
+  if (digits.startsWith('961')) return `+${digits}`;
+  return digits ? `+961${digits.replace(/^0+/, '')}` : '';
+}
+
+function randomGooglePassword(email) {
+  return `google:${email}:matjari`;
+}
+
+module.exports = { register, login, googleLogin, adminLogin, me, publicUser };
