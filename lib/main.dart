@@ -168,6 +168,16 @@ List<String> _screenshotUrls(Object? value) {
       .toList();
 }
 
+class InstalledPackageMatch {
+  const InstalledPackageMatch({
+    required this.packageName,
+    required this.versionCode,
+  });
+
+  final String packageName;
+  final int versionCode;
+}
+
 class StoreCategory {
   const StoreCategory({
     required this.id,
@@ -688,6 +698,31 @@ Future<int?> _installedPackageVersionCode(String packageName) async {
   }
 }
 
+Future<InstalledPackageMatch?> _resolveInstalledPackageByName(
+  String appName,
+) async {
+  if (!_canUseAndroidPackageBridge || appName.trim().isEmpty) return null;
+
+  try {
+    final payload = await _nativeChannel.invokeMethod<Object?>(
+      'resolveInstalledPackageByName',
+      {'appName': appName},
+    );
+    if (payload is! Map) return null;
+    final map = Map<Object?, Object?>.from(payload);
+    final packageName = _stringValue(map['packageName']);
+    if (packageName == null || packageName.trim().isEmpty) return null;
+    return InstalledPackageMatch(
+      packageName: packageName,
+      versionCode: _intValue(map['versionCode']) ?? 1,
+    );
+  } on MissingPluginException {
+    return null;
+  } on PlatformException {
+    return null;
+  }
+}
+
 Future<Map<String, String>> _packageAliases() async {
   if (!_canUseAndroidPackageBridge) return const {};
 
@@ -1096,6 +1131,32 @@ class _MatjariShellState extends State<MatjariShell>
     return _downloadPackageAliases[_itemKey(item)] ?? item.packageName;
   }
 
+  void _rememberResolvedPackage(StoreItem item, String packageName) {
+    final key = _itemKey(item);
+    if (packageName.trim().isEmpty) return;
+    _downloadPackageAliases[key] = packageName;
+    unawaited(_rememberPackageAlias(key, packageName));
+  }
+
+  Future<InstalledPackageMatch?> _resolveInstalledMatch(StoreItem item) async {
+    final directPackageName = _installPackageName(item).trim();
+    if (directPackageName.isNotEmpty) {
+      final versionCode = await _installedPackageVersionCode(directPackageName);
+      if (versionCode != null) {
+        return InstalledPackageMatch(
+          packageName: directPackageName,
+          versionCode: versionCode,
+        );
+      }
+    }
+
+    final match = await _resolveInstalledPackageByName(item.name);
+    if (match != null) {
+      _rememberResolvedPackage(item, match.packageName);
+    }
+    return match;
+  }
+
   int? _installedBuild(StoreItem item) {
     final key = _itemKey(item);
     if (_locallyRemoved.contains(key)) return null;
@@ -1150,7 +1211,9 @@ class _MatjariShellState extends State<MatjariShell>
 
     final installedBuild = _installedBuild(item);
     if (installedBuild != null && !_needsUpdate(item)) {
-      final opened = await _openInstalledPackage(_installPackageName(item));
+      final match = await _resolveInstalledMatch(item);
+      final opened =
+          match != null && await _openInstalledPackage(match.packageName);
       final token = _session?.token;
       if (opened && token != null) {
         unawaited(
@@ -1212,8 +1275,7 @@ class _MatjariShellState extends State<MatjariShell>
       final opened = result?['opened'] == true;
       final actualPackageName = _stringValue(result?['packageName']);
       if (actualPackageName != null && actualPackageName.isNotEmpty) {
-        _downloadPackageAliases[key] = actualPackageName;
-        unawaited(_rememberPackageAlias(key, actualPackageName));
+        _rememberResolvedPackage(item, actualPackageName);
       }
 
       if (!mounted) return;
@@ -1266,7 +1328,8 @@ class _MatjariShellState extends State<MatjariShell>
 
   Future<void> _handleUninstallAsync(StoreItem item) async {
     final key = _itemKey(item);
-    final opened = await _uninstallPackage(_installPackageName(item));
+    final match = await _resolveInstalledMatch(item);
+    final opened = match != null && await _uninstallPackage(match.packageName);
     if (!mounted) return;
 
     if (opened) {
@@ -1316,12 +1379,14 @@ class _MatjariShellState extends State<MatjariShell>
 
     try {
       for (final item in items) {
-        final packageName = _installPackageName(item);
-        if (packageName.trim().isEmpty) continue;
         final key = _itemKey(item);
+        final match = await _resolveInstalledMatch(item);
+        if (match == null) {
+          final packageName = _installPackageName(item);
+          if (packageName.trim().isEmpty) continue;
+        }
         scannedKeys.add(key);
-        final versionCode = await _installedPackageVersionCode(packageName);
-        if (versionCode != null) installed[key] = versionCode;
+        if (match != null) installed[key] = match.versionCode;
       }
     } finally {
       _installScanRunning = false;

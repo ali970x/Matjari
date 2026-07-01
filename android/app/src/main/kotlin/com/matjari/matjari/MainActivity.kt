@@ -37,6 +37,9 @@ class MainActivity : FlutterActivity() {
                     "openPackage" -> result.success(openPackage(call.argument("packageName")))
                     "uninstallPackage" -> result.success(openPackageUninstaller(call.argument("packageName")))
                     "installedVersionCode" -> result.success(installedVersionCode(call.argument("packageName")))
+                    "resolveInstalledPackageByName" -> result.success(
+                        resolveInstalledPackageByName(call.argument("appName")),
+                    )
                     "packageAliases" -> result.success(packageAliases())
                     "rememberPackageAlias" -> {
                         rememberPackageAlias(
@@ -161,6 +164,54 @@ class MainActivity : FlutterActivity() {
         } catch (_: Exception) {
             null
         }
+    }
+
+    private fun resolveInstalledPackageByName(appName: String?): Map<String, Any?>? {
+        val wanted = normalizeAppLabel(appName)
+        if (wanted.isBlank()) return null
+
+        val apps = try {
+            packageManager.getInstalledApplications(0)
+        } catch (_: Exception) {
+            return null
+        }
+
+        val matches = apps.mapNotNull { app ->
+            if (app.packageName == packageName) return@mapNotNull null
+            val label = try {
+                packageManager.getApplicationLabel(app).toString()
+            } catch (_: Exception) {
+                return@mapNotNull null
+            }
+            val normalized = normalizeAppLabel(label)
+            if (normalized.isBlank()) return@mapNotNull null
+
+            val score = when {
+                normalized == wanted -> 3
+                normalized.contains(wanted) -> 2
+                wanted.contains(normalized) -> 1
+                else -> 0
+            }
+            if (score == 0) null else ResolvedInstalledApp(app.packageName, label, score)
+        }
+
+        val match = matches.maxWithOrNull(
+            compareBy<ResolvedInstalledApp> { it.score }
+                .thenByDescending { it.label.length },
+        ) ?: return null
+
+        return mapOf(
+            "packageName" to match.packageName,
+            "label" to match.label,
+            "versionCode" to installedVersionCode(match.packageName),
+        )
+    }
+
+    private fun normalizeAppLabel(value: String?): String {
+        return value
+            ?.lowercase()
+            ?.replace(Regex("[^a-z0-9]+"), "")
+            ?: ""
     }
 
     private fun openPackageUninstaller(packageName: String?): Boolean {
@@ -413,6 +464,12 @@ class MainActivity : FlutterActivity() {
     data class ApkPackageInfo(
         val packageName: String,
         val versionCode: Long,
+    )
+
+    data class ResolvedInstalledApp(
+        val packageName: String,
+        val label: String,
+        val score: Int,
     )
 
     companion object {
