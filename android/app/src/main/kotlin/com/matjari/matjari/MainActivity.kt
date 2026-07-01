@@ -35,7 +35,16 @@ class MainActivity : FlutterActivity() {
                         result = result,
                     )
                     "openPackage" -> result.success(openPackage(call.argument("packageName")))
+                    "uninstallPackage" -> result.success(openPackageUninstaller(call.argument("packageName")))
                     "installedVersionCode" -> result.success(installedVersionCode(call.argument("packageName")))
+                    "packageAliases" -> result.success(packageAliases())
+                    "rememberPackageAlias" -> {
+                        rememberPackageAlias(
+                            key = call.argument("key"),
+                            packageName = call.argument("packageName"),
+                        )
+                        result.success(true)
+                    }
                     "pickAndUpload" -> pickAndUpload(
                         endpoint = call.argument("endpoint"),
                         token = call.argument("token"),
@@ -152,6 +161,40 @@ class MainActivity : FlutterActivity() {
         } catch (_: Exception) {
             null
         }
+    }
+
+    private fun openPackageUninstaller(packageName: String?): Boolean {
+        if (packageName.isNullOrBlank()) return false
+
+        val intent = Intent(Intent.ACTION_DELETE).apply {
+            data = Uri.parse("package:$packageName")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        return try {
+            startActivity(intent)
+            true
+        } catch (_: ActivityNotFoundException) {
+            false
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun packageAliases(): Map<String, String> {
+        return getSharedPreferences(ALIAS_PREFS, MODE_PRIVATE)
+            .all
+            .mapNotNull { (key, value) ->
+                if (value is String && value.isNotBlank()) key to value else null
+            }
+            .toMap()
+    }
+
+    private fun rememberPackageAlias(key: String?, packageName: String?) {
+        if (key.isNullOrBlank() || packageName.isNullOrBlank()) return
+        getSharedPreferences(ALIAS_PREFS, MODE_PRIVATE)
+            .edit()
+            .putString(key, packageName)
+            .apply()
     }
 
     private fun pickAndUpload(
@@ -375,5 +418,6 @@ class MainActivity : FlutterActivity() {
     companion object {
         private const val PICK_UPLOAD_REQUEST = 9401
         private const val APK_MIME_TYPE = "application/vnd.android.package-archive"
+        private const val ALIAS_PREFS = "matjari_package_aliases"
     }
 }

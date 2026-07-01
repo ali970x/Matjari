@@ -655,6 +655,21 @@ Future<bool> _openInstalledPackage(String packageName) async {
   }
 }
 
+Future<bool> _uninstallPackage(String packageName) async {
+  if (!_canUseAndroidPackageBridge || packageName.trim().isEmpty) return false;
+
+  try {
+    return await _nativeChannel.invokeMethod<bool>('uninstallPackage', {
+          'packageName': packageName,
+        }) ??
+        false;
+  } on MissingPluginException {
+    return false;
+  } on PlatformException {
+    return false;
+  }
+}
+
 Future<int?> _installedPackageVersionCode(String packageName) async {
   if (!_canUseAndroidPackageBridge || packageName.trim().isEmpty) return null;
 
@@ -670,6 +685,45 @@ Future<int?> _installedPackageVersionCode(String packageName) async {
     return null;
   } on PlatformException {
     return null;
+  }
+}
+
+Future<Map<String, String>> _packageAliases() async {
+  if (!_canUseAndroidPackageBridge) return const {};
+
+  try {
+    final payload = await _nativeChannel.invokeMethod<Object?>(
+      'packageAliases',
+    );
+    if (payload is Map) {
+      return payload.map(
+        (key, value) => MapEntry(key.toString(), value.toString()),
+      );
+    }
+  } on MissingPluginException {
+    return const {};
+  } on PlatformException {
+    return const {};
+  }
+  return const {};
+}
+
+Future<void> _rememberPackageAlias(String key, String packageName) async {
+  if (!_canUseAndroidPackageBridge ||
+      key.trim().isEmpty ||
+      packageName.trim().isEmpty) {
+    return;
+  }
+
+  try {
+    await _nativeChannel.invokeMethod<void>('rememberPackageAlias', {
+      'key': key,
+      'packageName': packageName,
+    });
+  } on MissingPluginException {
+    return;
+  } on PlatformException {
+    return;
   }
 }
 
@@ -949,6 +1003,7 @@ class _MatjariShellState extends State<MatjariShell>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _nativeChannel.setMethodCallHandler(_handleNativeMethodCall);
+    unawaited(_loadPackageAliases());
     _storeFuture = _api.fetchStoreData();
   }
 
@@ -976,6 +1031,18 @@ class _MatjariShellState extends State<MatjariShell>
     });
   }
 
+  Future<void> _loadPackageAliases() async {
+    final aliases = await _packageAliases();
+    if (!mounted || aliases.isEmpty) return;
+    _notifyStoreStatusChanged(() {
+      _downloadPackageAliases
+        ..clear()
+        ..addAll(aliases);
+    });
+    _lastInstallScanSignature = '';
+    unawaited(_refreshInstalledPackages(_latestItems));
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) return;
@@ -999,7 +1066,6 @@ class _MatjariShellState extends State<MatjariShell>
     _notifyStoreStatusChanged(() {
       _session = null;
       _installedBuilds.clear();
-      _downloadPackageAliases.clear();
       _locallyRemoved.clear();
     });
     _showSnack(context, 'Signed out.');
@@ -1147,6 +1213,7 @@ class _MatjariShellState extends State<MatjariShell>
       final actualPackageName = _stringValue(result?['packageName']);
       if (actualPackageName != null && actualPackageName.isNotEmpty) {
         _downloadPackageAliases[key] = actualPackageName;
+        unawaited(_rememberPackageAlias(key, actualPackageName));
       }
 
       if (!mounted) return;
@@ -1194,7 +1261,19 @@ class _MatjariShellState extends State<MatjariShell>
   }
 
   void _handleUninstall(StoreItem item) {
+    unawaited(_handleUninstallAsync(item));
+  }
+
+  Future<void> _handleUninstallAsync(StoreItem item) async {
     final key = _itemKey(item);
+    final opened = await _uninstallPackage(_installPackageName(item));
+    if (!mounted) return;
+
+    if (opened) {
+      _showSnack(context, 'Uninstaller opened for ${item.name}.');
+      return;
+    }
+
     _notifyStoreStatusChanged(() {
       _downloadProgress.remove(key);
       _installedBuilds.remove(key);
