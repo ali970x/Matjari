@@ -10,6 +10,7 @@ const downloadRoutes = require('./routes/downloadRoutes');
 const reviewRoutes = require('./routes/reviewRoutes');
 const libraryRoutes = require('./routes/libraryRoutes');
 const categoryRoutes = require('./routes/categoryRoutes');
+const userRoutes = require('./routes/userRoutes');
 const { notFound, errorHandler } = require('./middleware/errorHandler');
 
 const app = express();
@@ -42,6 +43,7 @@ app.use('/api/uploads', uploadRoutes);
 app.use('/api/downloads', downloadRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/library', libraryRoutes);
+app.use('/api/users', userRoutes);
 app.use('/api', categoryRoutes);
 
 app.use(notFound);

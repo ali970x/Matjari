@@ -5,6 +5,7 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.StatFs
 import android.provider.OpenableColumns
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
@@ -41,6 +42,13 @@ class MainActivity : FlutterActivity() {
                         resolveInstalledPackageByName(call.argument("appName")),
                     )
                     "packageAliases" -> result.success(packageAliases())
+                    "deviceStorageInfo" -> result.success(deviceStorageInfo())
+                    "openSupportEmail" -> result.success(
+                        openSupportEmail(
+                            email = call.argument("email"),
+                            subject = call.argument("subject"),
+                        ),
+                    )
                     "rememberPackageAlias" -> {
                         rememberPackageAlias(
                             key = call.argument("key"),
@@ -254,6 +262,35 @@ class MainActivity : FlutterActivity() {
             .edit()
             .putString(key, packageName)
             .apply()
+    }
+
+    private fun deviceStorageInfo(): Map<String, Long> {
+        val stat = StatFs(filesDir.absolutePath)
+        return mapOf(
+            "totalBytes" to stat.totalBytes,
+            "freeBytes" to stat.availableBytes,
+        )
+    }
+
+    private fun openSupportEmail(email: String?, subject: String?): Boolean {
+        if (email.isNullOrBlank()) return false
+        val intent = Intent(Intent.ACTION_SENDTO).apply {
+            data = Uri.parse("mailto:$email")
+            putExtra(Intent.EXTRA_SUBJECT, subject ?: "Matjari help and feedback")
+            putExtra(
+                Intent.EXTRA_TEXT,
+                "Hello Matjari support,\n\nApp version: 1.1.3+5\nIssue:\n",
+            )
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        return try {
+            startActivity(intent)
+            true
+        } catch (_: ActivityNotFoundException) {
+            false
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private fun pickAndUpload(

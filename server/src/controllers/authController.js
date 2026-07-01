@@ -31,6 +31,7 @@ const register = asyncHandler(async (req, res) => {
     avatar_url: String(avatar_url || '').trim(),
     password_hash: await bcrypt.hash(password, 10),
     role: 'user',
+    blocked: false,
   });
 
   res.status(201).json({ user: publicUser(user), token: signToken(user) });
@@ -69,6 +70,18 @@ const me = asyncHandler(async (req, res) => {
   res.json({ user: publicUser(req.user) });
 });
 
+const updateMe = asyncHandler(async (req, res) => {
+  const attrs = {};
+  if (req.body.full_name !== undefined) attrs.full_name = String(req.body.full_name).trim();
+  if (req.body.avatar_url !== undefined) attrs.avatar_url = String(req.body.avatar_url).trim();
+  if (Object.keys(attrs).length === 0) {
+    throw httpError(400, 'Nothing to update');
+  }
+
+  const user = await store.update('users', req.user.id, attrs);
+  res.json({ user: publicUser(user) });
+});
+
 const googleLogin = asyncHandler(async (req, res) => {
   const { email, full_name, username, phone_number, avatar_url } = req.body;
   if (!email) throw httpError(400, 'email is required');
@@ -94,6 +107,7 @@ const googleLogin = asyncHandler(async (req, res) => {
       avatar_url: String(avatar_url || '').trim(),
       password_hash: await bcrypt.hash(randomGooglePassword(normalizedEmail), 10),
       role: 'user',
+      blocked: false,
       auth_provider: 'google',
     });
   }
@@ -103,6 +117,9 @@ const googleLogin = asyncHandler(async (req, res) => {
 
 async function assertPassword(user, password) {
   if (!user) throw httpError(401, 'Invalid credentials');
+  if (user.blocked === true || user.is_blocked === true) {
+    throw httpError(403, 'This account is blocked');
+  }
   const matches = await bcrypt.compare(password, user.password_hash);
   if (!matches) throw httpError(401, 'Invalid credentials');
 }
@@ -128,4 +145,4 @@ function randomGooglePassword(email) {
   return `google:${email}:matjari`;
 }
 
-module.exports = { register, login, googleLogin, adminLogin, me, publicUser };
+module.exports = { register, login, googleLogin, adminLogin, me, updateMe, publicUser };

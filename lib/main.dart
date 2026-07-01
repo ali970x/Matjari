@@ -23,55 +23,153 @@ const _ink = Color(0xFF202124);
 const _muted = Color(0xFF5F6368);
 const _line = Color(0xFFE0E3E7);
 const _surface = Color(0xFFF7F9FC);
-const _appVersionName = '1.1.2';
-const _appBuildNumber = 4;
+const _appVersionName = '1.1.3';
+const _appBuildNumber = 5;
 const _whatsAppOtpEndpoint =
     'https://whatsapp-server1-production-72d1.up.railway.app/api/whatsapp/send-message';
+const _supportEmail = 'alimjdandash@gmail.com';
 const _apiBaseUrl = String.fromEnvironment(
   'API_BASE_URL',
   defaultValue: 'https://matjari-api.onrender.com',
 );
 const _nativeChannel = MethodChannel('matjari/native');
 
-class MatjariApp extends StatelessWidget {
+enum AppLanguage { en, ar }
+
+class MatjariSettings {
+  const MatjariSettings({
+    required this.language,
+    required this.themeMode,
+    required this.setLanguage,
+    required this.setThemeMode,
+  });
+
+  final AppLanguage language;
+  final ThemeMode themeMode;
+  final ValueChanged<AppLanguage> setLanguage;
+  final ValueChanged<ThemeMode> setThemeMode;
+}
+
+class MatjariSettingsScope extends InheritedWidget {
+  const MatjariSettingsScope({
+    super.key,
+    required this.settings,
+    required super.child,
+  });
+
+  final MatjariSettings settings;
+
+  static MatjariSettings? maybeOf(BuildContext context) {
+    return context
+        .dependOnInheritedWidgetOfExactType<MatjariSettingsScope>()
+        ?.settings;
+  }
+
+  static MatjariSettings of(BuildContext context) {
+    return maybeOf(context) ??
+        MatjariSettings(
+          language: AppLanguage.en,
+          themeMode: ThemeMode.light,
+          setLanguage: (_) {},
+          setThemeMode: (_) {},
+        );
+  }
+
+  @override
+  bool updateShouldNotify(MatjariSettingsScope oldWidget) {
+    return oldWidget.settings.language != settings.language ||
+        oldWidget.settings.themeMode != settings.themeMode;
+  }
+}
+
+String _t(BuildContext context, String en, String ar) {
+  return MatjariSettingsScope.maybeOf(context)?.language == AppLanguage.ar
+      ? ar
+      : en;
+}
+
+class MatjariApp extends StatefulWidget {
   const MatjariApp({super.key});
 
   @override
+  State<MatjariApp> createState() => _MatjariAppState();
+}
+
+class _MatjariAppState extends State<MatjariApp> {
+  AppLanguage _language = AppLanguage.en;
+  ThemeMode _themeMode = ThemeMode.light;
+
+  @override
   Widget build(BuildContext context) {
+    final settings = MatjariSettings(
+      language: _language,
+      themeMode: _themeMode,
+      setLanguage: (value) => setState(() => _language = value),
+      setThemeMode: (value) => setState(() => _themeMode = value),
+    );
+
     return MaterialApp(
       title: 'Matjari',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: _brandBlue,
-          primary: _brandBlue,
-          surface: Colors.white,
-        ),
-        scaffoldBackgroundColor: Colors.white,
-        textTheme: Theme.of(context).textTheme.apply(
-          bodyColor: _ink,
-          displayColor: _ink,
-          fontFamily: 'Roboto',
-        ),
-        navigationBarTheme: const NavigationBarThemeData(
-          backgroundColor: _surface,
-          indicatorColor: Color(0xFFCDEBFF),
-          labelTextStyle: WidgetStatePropertyAll(
-            TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-          ),
-        ),
-        chipTheme: ChipThemeData(
-          backgroundColor: Colors.white,
-          selectedColor: const Color(0xFFCDEBFF),
-          side: const BorderSide(color: _line),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-          labelStyle: const TextStyle(fontWeight: FontWeight.w600),
-        ),
+      themeMode: _themeMode,
+      theme: _matjariTheme(Brightness.light),
+      darkTheme: _matjariTheme(Brightness.dark),
+      builder: (context, child) => Directionality(
+        textDirection: _language == AppLanguage.ar
+            ? TextDirection.rtl
+            : TextDirection.ltr,
+        child: child ?? const SizedBox.shrink(),
       ),
-      home: const MatjariShell(),
+      home: MatjariSettingsScope(
+        settings: settings,
+        child: const MatjariShell(),
+      ),
     );
   }
+}
+
+ThemeData _matjariTheme(Brightness brightness) {
+  final dark = brightness == Brightness.dark;
+  final scheme = ColorScheme.fromSeed(
+    seedColor: _brandBlue,
+    brightness: brightness,
+    primary: _brandBlue,
+    surface: dark ? const Color(0xFF111827) : Colors.white,
+  );
+
+  return ThemeData(
+    useMaterial3: true,
+    brightness: brightness,
+    colorScheme: scheme,
+    scaffoldBackgroundColor: dark ? const Color(0xFF0B1220) : Colors.white,
+    textTheme: Typography.material2021().black.apply(
+      bodyColor: dark ? Colors.white : _ink,
+      displayColor: dark ? Colors.white : _ink,
+      fontFamily: 'Roboto',
+    ),
+    navigationBarTheme: NavigationBarThemeData(
+      backgroundColor: dark ? const Color(0xFF111827) : _surface,
+      indicatorColor: dark ? const Color(0xFF1D4ED8) : const Color(0xFFCDEBFF),
+      labelTextStyle: const WidgetStatePropertyAll(
+        TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+      ),
+    ),
+    chipTheme: ChipThemeData(
+      backgroundColor: dark ? const Color(0xFF111827) : Colors.white,
+      selectedColor: dark ? const Color(0xFF1D4ED8) : const Color(0xFFCDEBFF),
+      side: BorderSide(color: dark ? const Color(0xFF263244) : _line),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      labelStyle: TextStyle(
+        fontWeight: FontWeight.w600,
+        color: dark ? Colors.white : _ink,
+      ),
+    ),
+    inputDecorationTheme: InputDecorationTheme(
+      filled: dark,
+      fillColor: dark ? const Color(0xFF111827) : null,
+      border: const UnderlineInputBorder(),
+    ),
+  );
 }
 
 class StoreItem {
@@ -304,6 +402,75 @@ class AuthSession {
   final String username;
   final String phoneNumber;
   final String avatarUrl;
+
+  AuthSession copyWith({
+    String? token,
+    String? role,
+    String? name,
+    String? email,
+    String? username,
+    String? phoneNumber,
+    String? avatarUrl,
+  }) {
+    return AuthSession(
+      token: token ?? this.token,
+      role: role ?? this.role,
+      name: name ?? this.name,
+      email: email ?? this.email,
+      username: username ?? this.username,
+      phoneNumber: phoneNumber ?? this.phoneNumber,
+      avatarUrl: avatarUrl ?? this.avatarUrl,
+    );
+  }
+}
+
+class AdminUser {
+  const AdminUser({
+    required this.id,
+    required this.email,
+    required this.username,
+    required this.fullName,
+    required this.phoneNumber,
+    required this.avatarUrl,
+    required this.role,
+    required this.blocked,
+  });
+
+  factory AdminUser.fromJson(Map<String, dynamic> json) {
+    return AdminUser(
+      id: _stringValue(json['id']) ?? '',
+      email: _stringValue(json['email']) ?? '',
+      username: _stringValue(json['username']) ?? '',
+      fullName: _stringValue(json['full_name']) ?? '',
+      phoneNumber: _stringValue(json['phone_number']) ?? '',
+      avatarUrl: _stringValue(json['avatar_url']) ?? '',
+      role: _stringValue(json['role']) ?? 'user',
+      blocked: json['blocked'] == true || json['is_blocked'] == true,
+    );
+  }
+
+  final String id;
+  final String email;
+  final String username;
+  final String fullName;
+  final String phoneNumber;
+  final String avatarUrl;
+  final String role;
+  final bool blocked;
+}
+
+class StorageInfo {
+  const StorageInfo({required this.totalBytes, required this.freeBytes});
+
+  final int totalBytes;
+  final int freeBytes;
+
+  int get usedBytes => (totalBytes - freeBytes).clamp(0, totalBytes).toInt();
+
+  double get usedRatio {
+    if (totalBytes <= 0) return 0;
+    return (usedBytes / totalBytes).clamp(0.0, 1.0);
+  }
 }
 
 typedef StoreItemLabelBuilder = String Function(StoreItem item);
@@ -438,6 +605,69 @@ class MatjariApi {
     } catch (_) {
       return false;
     }
+  }
+
+  Future<AuthSession> updateProfile({
+    required AuthSession session,
+    required String fullName,
+    required String avatarUrl,
+  }) async {
+    final payload = await _patch('/api/auth/me', {
+      'full_name': fullName,
+      'avatar_url': avatarUrl,
+    }, token: session.token);
+    return sessionFromPayload({...payload, 'token': session.token});
+  }
+
+  Future<List<AdminUser>> fetchUsers(String token) async {
+    final payload = await _get('/api/users', token: token);
+    final users = payload['users'];
+    if (users is! List) return const [];
+    return users
+        .whereType<Map<String, dynamic>>()
+        .map(AdminUser.fromJson)
+        .toList();
+  }
+
+  Future<void> updateUser({
+    required String token,
+    required AdminUser user,
+    required String email,
+    required String username,
+    required String fullName,
+    required String phoneNumber,
+    required String password,
+    required bool blocked,
+  }) async {
+    if (user.id.isEmpty) return;
+    final body = {
+      'email': email,
+      'username': username,
+      'full_name': fullName,
+      'phone_number': phoneNumber,
+      'blocked': blocked,
+    };
+    if (password.trim().isNotEmpty) body['password'] = password;
+    await _put('/api/users/${user.id}', body, token: token);
+  }
+
+  Future<void> deleteUser({
+    required String token,
+    required AdminUser user,
+  }) async {
+    if (user.id.isEmpty) return;
+    await _delete('/api/users/${user.id}', token: token);
+  }
+
+  Future<void> promoteUser({
+    required String token,
+    required AdminUser user,
+    required bool admin,
+  }) async {
+    if (user.id.isEmpty) return;
+    await _post('/api/users/${user.id}/role', {
+      'role': admin ? 'admin' : 'user',
+    }, token: token);
   }
 
   Future<List<Map<String, dynamic>>> fetchReviews(String appId) async {
@@ -633,6 +863,22 @@ class MatjariApi {
     return _decode(response);
   }
 
+  Future<Map<String, dynamic>> _patch(
+    String path,
+    Map<String, dynamic> body, {
+    required String token,
+  }) async {
+    final response = await _client.patch(
+      Uri.parse('$_apiBaseUrl$path'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $token',
+      },
+      body: jsonEncode(body),
+    );
+    return _decode(response);
+  }
+
   Map<String, dynamic> _decode(http.Response response) {
     final decoded = jsonDecode(response.body);
     final payload = decoded is Map<String, dynamic>
@@ -731,6 +977,14 @@ String _downloadLabel(int count) {
   return '$count downloads';
 }
 
+String _formatBytes(int bytes) {
+  if (bytes <= 0) return '0 GB';
+  const gb = 1024 * 1024 * 1024;
+  const mb = 1024 * 1024;
+  if (bytes >= gb) return '${(bytes / gb).toStringAsFixed(1)} GB';
+  return '${(bytes / mb).toStringAsFixed(0)} MB';
+}
+
 String _offeredBy(String packageName) {
   final parts = packageName
       .split('.')
@@ -771,6 +1025,42 @@ Future<Map<String, dynamic>?> _downloadAndInstallApk({
     return null;
   } on PlatformException {
     return null;
+  }
+}
+
+Future<StorageInfo?> _deviceStorageInfo() async {
+  if (!_canUseAndroidPackageBridge) return null;
+
+  try {
+    final payload = await _nativeChannel.invokeMethod<Object?>(
+      'deviceStorageInfo',
+    );
+    if (payload is! Map) return null;
+    final map = Map<Object?, Object?>.from(payload);
+    final total = _intValue(map['totalBytes']) ?? 0;
+    final free = _intValue(map['freeBytes']) ?? 0;
+    if (total <= 0) return null;
+    return StorageInfo(totalBytes: total, freeBytes: free);
+  } on MissingPluginException {
+    return null;
+  } on PlatformException {
+    return null;
+  }
+}
+
+Future<bool> _openSupportEmail() async {
+  if (!_canUseAndroidPackageBridge) return false;
+
+  try {
+    return await _nativeChannel.invokeMethod<bool>('openSupportEmail', {
+          'email': _supportEmail,
+          'subject': 'Matjari help and feedback',
+        }) ??
+        false;
+  } on MissingPluginException {
+    return false;
+  } on PlatformException {
+    return false;
   }
 }
 
@@ -1007,42 +1297,47 @@ const _items = <StoreItem>[
   StoreItem(
     name: 'ChatGPT',
     category: 'Productivity',
-    summary: 'Write, learn, plan, and explore ideas with an AI assistant.',
+    summary:
+        'A polished AI assistant listing for writing, planning, learning, and everyday productivity.',
     rating: 4.8,
     icon: Icons.auto_awesome,
     color: Color(0xFF111827),
     type: 'apps',
-    installed: true,
     size: '156 MB',
     version: '3.2.1',
     downloads: '500M+',
+    packageName: 'com.openai.chatgpt',
+    iconUrl: 'https://matjari-api.onrender.com/uploads/seed/chatgpt.png',
   ),
   StoreItem(
     name: 'TikTok - Videos, Shop & LIVE',
     category: 'Social',
-    summary: 'Short videos, creators, shops, and live moments in one place.',
+    summary:
+        'Creator videos, live moments, shopping discovery, and social entertainment in a familiar listing.',
     rating: 4.6,
     icon: Icons.music_note,
     color: Color(0xFF050505),
     type: 'apps',
-    installed: true,
-    updateAvailable: true,
     size: '210 MB',
     version: '38.4.0',
     downloads: '1B+',
+    packageName: 'com.zhiliaoapp.musically',
+    iconUrl: 'https://matjari-api.onrender.com/uploads/seed/tiktok.png',
   ),
   StoreItem(
     name: 'Alibaba.com - B2B marketplace',
     category: 'Shopping',
-    summary: 'Source products, compare suppliers, and manage orders.',
+    summary:
+        'A marketplace showcase for suppliers, product sourcing, trade deals, and business ordering.',
     rating: 4.5,
     icon: Icons.storefront,
     color: Color(0xFFFF6A00),
     type: 'apps',
-    installed: true,
     size: '124 MB',
     version: '26.21.2',
     downloads: '500M+',
+    packageName: 'com.alibaba.intl.android.apps.poseidon',
+    iconUrl: 'https://matjari-api.onrender.com/uploads/seed/alibaba.png',
   ),
   StoreItem(
     name: 'OLX Lebanon',
@@ -1052,10 +1347,10 @@ const _items = <StoreItem>[
     icon: Icons.sell,
     color: Color(0xFF37A7B9),
     type: 'apps',
-    installed: true,
     size: '72 MB',
     version: '12.8.4',
     downloads: '5M+',
+    packageName: 'com.olxmena.horizontal',
   ),
   StoreItem(
     name: 'MAF Carrefour Online Shopping',
@@ -1068,6 +1363,7 @@ const _items = <StoreItem>[
     size: '88 MB',
     version: '8.9.1',
     downloads: '10M+',
+    packageName: 'com.maf.carrefour',
   ),
   StoreItem(
     name: 'Notion Calendar',
@@ -1077,15 +1373,16 @@ const _items = <StoreItem>[
     icon: Icons.calendar_month,
     color: Color(0xFF111111),
     type: 'apps',
-    installed: true,
     size: '67 MB',
     version: '2.14.0',
     downloads: '1M+',
+    packageName: 'com.cron.calendar',
   ),
   StoreItem(
     name: 'Clash of Clans',
     category: 'Strategy',
-    summary: 'Build, battle, and defend your village with your clan.',
+    summary:
+        'A strategy game showcase with villages, clans, upgrades, and fast battle discovery.',
     rating: 4.5,
     icon: Icons.shield,
     color: Color(0xFFB85B22),
@@ -1093,6 +1390,8 @@ const _items = <StoreItem>[
     size: '316 MB',
     version: '18.0.2',
     downloads: '500M+',
+    packageName: 'com.supercell.clashofclans',
+    iconUrl: 'https://matjari-api.onrender.com/uploads/seed/clash-of-clans.png',
   ),
   StoreItem(
     name: '8 Ball Pool',
@@ -1105,11 +1404,13 @@ const _items = <StoreItem>[
     size: '182 MB',
     version: '56.3.1',
     downloads: '1B+',
+    packageName: 'com.miniclip.eightballpool',
   ),
   StoreItem(
     name: 'War Drone: 3D Shooting Games',
     category: 'Action',
-    summary: 'Deploy drones and protect troops in fast missions.',
+    summary:
+        'A cinematic action listing with aerial missions, tactical objectives, and 3D combat visuals.',
     rating: 4.7,
     icon: Icons.flight_takeoff,
     color: Color(0xFF5D718C),
@@ -1117,11 +1418,14 @@ const _items = <StoreItem>[
     size: '401 MB',
     version: '7.1.0',
     downloads: '10M+',
+    packageName: 'com.skyforge.wardrone',
+    iconUrl: 'https://matjari-api.onrender.com/uploads/seed/war-drone.png',
   ),
   StoreItem(
     name: 'RFS - Real Flight Simulator',
     category: 'Simulation',
-    summary: 'Pilot aircraft and land at airports around the world.',
+    summary:
+        'A simulator showcase for aircraft, airports, routes, and realistic flight sessions.',
     rating: 4.2,
     icon: Icons.airplanemode_active,
     color: Color(0xFF2F80ED),
@@ -1130,11 +1434,14 @@ const _items = <StoreItem>[
     size: '512 MB',
     version: '2.7.4',
     downloads: '5M+',
+    packageName: 'it.rortos.realflightsimulator',
+    iconUrl: 'https://matjari-api.onrender.com/uploads/seed/rfs.png',
   ),
   StoreItem(
     name: 'Project Hail Mary: A Novel',
     category: 'Science Fiction',
-    summary: 'A survival story across space, memory, and impossible odds.',
+    summary:
+        'A premium ebook listing with strong cover art, ratings, and a clean reading preview.',
     rating: 4.9,
     icon: Icons.menu_book,
     color: Color(0xFF184E77),
@@ -1143,6 +1450,9 @@ const _items = <StoreItem>[
     size: 'Ebook',
     version: 'Book',
     downloads: 'Top read',
+    packageName: 'book.project-hail-mary',
+    iconUrl:
+        'https://matjari-api.onrender.com/uploads/seed/project-hail-mary.png',
   ),
   StoreItem(
     name: 'Exodus: The Archimedes Engine',
@@ -1255,12 +1565,6 @@ class _AuthGatePageState extends State<AuthGatePage> {
                 onGoogle: _loginByGoogle,
                 onForgotPassword: _forgotPassword,
               ),
-            const SizedBox(height: 22),
-            const Text(
-              'Admin signs in from the same form using admin / 123456.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: _muted, fontSize: 12),
-            ),
           ],
         ),
       ),
@@ -1501,8 +1805,31 @@ class _LoginCard extends StatelessWidget {
           const SizedBox(height: 8),
           OutlinedButton.icon(
             onPressed: loading ? null : onGoogle,
-            icon: const Icon(Icons.account_circle_outlined),
-            label: const Text('Login by Google'),
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 13),
+              side: const BorderSide(color: Color(0xFFB8C7D9)),
+              backgroundColor: const Color(0xFFF8FBFF),
+              foregroundColor: _ink,
+            ),
+            icon: Container(
+              width: 24,
+              height: 24,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: _line),
+              ),
+              child: const Center(
+                child: Text(
+                  'G',
+                  style: TextStyle(
+                    color: Color(0xFF4285F4),
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ),
+            label: const Text('Continue with Google'),
           ),
           const SizedBox(height: 8),
           OutlinedButton(
@@ -2018,6 +2345,12 @@ class _MatjariShellState extends State<MatjariShell>
     return _installedBuild(item) != null;
   }
 
+  bool _isPreviewOnly(StoreItem item) {
+    return item.type != 'books' &&
+        _installedBuild(item) == null &&
+        !_hasDirectDownload(item);
+  }
+
   String _actionLabelFor(StoreItem item) {
     final progress = _progressFor(item);
     if (progress != null) {
@@ -2027,6 +2360,7 @@ class _MatjariShellState extends State<MatjariShell>
     if (installedBuild != null) {
       return _needsUpdate(item) ? 'Update' : 'Open';
     }
+    if (_isPreviewOnly(item)) return 'Preview';
     if (item.type == 'books' && item.price != null) return item.price!;
     return 'Download';
   }
@@ -2069,6 +2403,14 @@ class _MatjariShellState extends State<MatjariShell>
       return;
     }
 
+    if (_isPreviewOnly(item)) {
+      _showSnack(
+        context,
+        '${item.name} is a showcase listing. Upload an APK from admin to enable install.',
+      );
+      return;
+    }
+
     _startDownload(item, updating: installedBuild != null);
   }
 
@@ -2089,17 +2431,8 @@ class _MatjariShellState extends State<MatjariShell>
       if (!_hasDirectDownload(item)) {
         _notifyStoreStatusChanged(() {
           _downloadProgress.remove(key);
-          _installedBuilds[key] = item.versionCode;
-          _locallyRemoved.remove(key);
         });
-        final token = _session?.token;
-        if (token != null) {
-          unawaited(_syncInstalledApp(token: token, item: item));
-        }
-        _showSnack(
-          context,
-          '${updating ? 'Updated' : 'Installed'} ${item.name}.',
-        );
+        _showSnack(context, 'Upload an APK first to install ${item.name}.');
         return;
       }
 
@@ -2142,20 +2475,6 @@ class _MatjariShellState extends State<MatjariShell>
 
   bool _hasDirectDownload(StoreItem item) {
     return (item.fileUrl?.trim().isNotEmpty ?? false);
-  }
-
-  Future<void> _syncInstalledApp({
-    required String token,
-    required StoreItem item,
-  }) async {
-    try {
-      await Future.wait([
-        _api.recordDownload(item, token),
-        _api.saveUserApp(token: token, item: item),
-      ]);
-    } catch (_) {
-      // Local install state stays usable if the API is temporarily offline.
-    }
   }
 
   void _handleUninstall(StoreItem item) {
@@ -2290,11 +2609,20 @@ class _MatjariShellState extends State<MatjariShell>
         if (snapshot.connectionState == ConnectionState.done) {
           _maybeRefreshInstalledPackages(store.items);
         }
+        final activeDownloads = _downloadProgress.length;
+        final updateCount = store.items.where(_needsUpdate).length;
+        final pendingCount = activeDownloads + updateCount;
         final pages = <Widget>[
           StoreFeedPage(
+            api: _api,
+            session: _session,
             feedType: 'games',
             items: store.items,
             categories: store.categories,
+            activeDownloads: activeDownloads,
+            pendingCount: pendingCount,
+            updateCount: updateCount,
+            onSessionChanged: _setSession,
             selectedTopIndex: _topIndex,
             onTopChanged: (value) => setState(() => _topIndex = value),
             onItemSelected: _openDetails,
@@ -2305,9 +2633,15 @@ class _MatjariShellState extends State<MatjariShell>
             onUninstall: _handleUninstall,
           ),
           StoreFeedPage(
+            api: _api,
+            session: _session,
             feedType: 'apps',
             items: store.items,
             categories: store.categories,
+            activeDownloads: activeDownloads,
+            pendingCount: pendingCount,
+            updateCount: updateCount,
+            onSessionChanged: _setSession,
             selectedTopIndex: _topIndex,
             onTopChanged: (value) => setState(() => _topIndex = value),
             onItemSelected: _openDetails,
@@ -2340,6 +2674,8 @@ class _MatjariShellState extends State<MatjariShell>
             api: _api,
             items: store.items,
             session: _session,
+            activeDownloads: activeDownloads,
+            updateCount: updateCount,
             onSessionChanged: _setSession,
             onLogout: _clearSession,
             onItemSelected: _openDetails,
@@ -2360,31 +2696,31 @@ class _MatjariShellState extends State<MatjariShell>
             selectedIndex: _bottomIndex,
             onDestinationSelected: (value) =>
                 setState(() => _bottomIndex = value),
-            destinations: const [
+            destinations: [
               NavigationDestination(
-                icon: Icon(Icons.sports_esports_outlined),
-                selectedIcon: Icon(Icons.sports_esports),
-                label: 'Games',
+                icon: const Icon(Icons.sports_esports_outlined),
+                selectedIcon: const Icon(Icons.sports_esports),
+                label: _t(context, 'Games', 'الألعاب'),
               ),
               NavigationDestination(
-                icon: Icon(Icons.grid_view_outlined),
-                selectedIcon: Icon(Icons.grid_view_rounded),
-                label: 'Apps',
+                icon: const Icon(Icons.grid_view_outlined),
+                selectedIcon: const Icon(Icons.grid_view_rounded),
+                label: _t(context, 'Apps', 'التطبيقات'),
               ),
               NavigationDestination(
-                icon: Icon(Icons.search),
-                selectedIcon: Icon(Icons.search),
-                label: 'Search',
+                icon: const Icon(Icons.search),
+                selectedIcon: const Icon(Icons.search),
+                label: _t(context, 'Search', 'بحث'),
               ),
               NavigationDestination(
-                icon: Icon(Icons.bookmark_border),
-                selectedIcon: Icon(Icons.bookmark),
-                label: 'Books',
+                icon: const Icon(Icons.bookmark_border),
+                selectedIcon: const Icon(Icons.bookmark),
+                label: _t(context, 'Books', 'كتب'),
               ),
               NavigationDestination(
-                icon: Icon(Icons.person_outline),
-                selectedIcon: Icon(Icons.person),
-                label: 'You',
+                icon: const Icon(Icons.person_outline),
+                selectedIcon: const Icon(Icons.person),
+                label: _t(context, 'You', 'أنت'),
               ),
             ],
           ),
@@ -2454,9 +2790,15 @@ class ApiStatusBanner extends StatelessWidget {
 class StoreFeedPage extends StatelessWidget {
   const StoreFeedPage({
     super.key,
+    required this.api,
+    required this.session,
     required this.feedType,
     required this.items,
     required this.categories,
+    required this.activeDownloads,
+    required this.pendingCount,
+    required this.updateCount,
+    required this.onSessionChanged,
     required this.selectedTopIndex,
     required this.onTopChanged,
     required this.onItemSelected,
@@ -2467,9 +2809,15 @@ class StoreFeedPage extends StatelessWidget {
     required this.onUninstall,
   });
 
+  final MatjariApi api;
+  final AuthSession? session;
   final String feedType;
   final List<StoreItem> items;
   final List<StoreCategory> categories;
+  final int activeDownloads;
+  final int pendingCount;
+  final int updateCount;
+  final ValueChanged<AuthSession> onSessionChanged;
   final int selectedTopIndex;
   final ValueChanged<int> onTopChanged;
   final ValueChanged<StoreItem> onItemSelected;
@@ -2492,13 +2840,20 @@ class StoreFeedPage extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const StoreHeader(),
+              StoreHeader(
+                api: api,
+                session: session,
+                activeDownloads: activeDownloads,
+                pendingCount: pendingCount,
+                updateCount: updateCount,
+                onSessionChanged: onSessionChanged,
+              ),
               TopTabs(
-                labels: const [
-                  'For you',
-                  'Top charts',
-                  'Other devices',
-                  'Kids',
+                labels: [
+                  _t(context, 'For you', 'لك'),
+                  _t(context, 'Top charts', 'الأعلى'),
+                  _t(context, 'Other devices', 'أجهزة أخرى'),
+                  _t(context, 'Kids', 'أطفال'),
                 ],
                 selectedIndex: selectedTopIndex,
                 onChanged: onTopChanged,
@@ -2523,11 +2878,27 @@ class StoreFeedPage extends StatelessWidget {
           SliverToBoxAdapter(
             child: StoreHeroBanner(
               title: feedType == 'apps'
-                  ? 'Fresh apps picked for you'
-                  : 'New games to play this week',
+                  ? _t(
+                      context,
+                      'Fresh apps picked for you',
+                      'تطبيقات مختارة لك',
+                    )
+                  : _t(
+                      context,
+                      'New games to play this week',
+                      'ألعاب جديدة لهذا الأسبوع',
+                    ),
               subtitle: feedType == 'apps'
-                  ? 'Smart tools, shopping, social, and everyday favorites'
-                  : 'Action, strategy, puzzle, and simulator highlights',
+                  ? _t(
+                      context,
+                      'Smart tools, shopping, social, and everyday favorites',
+                      'أدوات ذكية وتسوق وتواصل واختيارات يومية',
+                    )
+                  : _t(
+                      context,
+                      'Action, strategy, puzzle, and simulator highlights',
+                      'أكشن واستراتيجية وألغاز ومحاكاة',
+                    ),
               icon: feedType == 'apps' ? Icons.apps : Icons.sports_esports,
             ),
           ),
@@ -2587,10 +2958,27 @@ class StoreFeedPage extends StatelessWidget {
 }
 
 class StoreHeader extends StatelessWidget {
-  const StoreHeader({super.key});
+  const StoreHeader({
+    super.key,
+    required this.api,
+    required this.session,
+    required this.activeDownloads,
+    required this.pendingCount,
+    required this.updateCount,
+    required this.onSessionChanged,
+  });
+
+  final MatjariApi api;
+  final AuthSession? session;
+  final int activeDownloads;
+  final int pendingCount;
+  final int updateCount;
+  final ValueChanged<AuthSession> onSessionChanged;
 
   @override
   Widget build(BuildContext context) {
+    final pendingLabel = pendingCount > 99 ? '99+' : '$pendingCount';
+    final updateLabel = updateCount > 99 ? '99+' : '$updateCount';
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
       child: Row(
@@ -2607,23 +2995,43 @@ class StoreHeader extends StatelessWidget {
           ),
           BadgeIcon(
             icon: Icons.check_circle_outline,
-            count: '1',
-            onTap: () => _showSnack(context, 'No pending approvals.'),
+            count: pendingLabel,
+            onTap: () => _showSnack(
+              context,
+              _t(
+                context,
+                'Downloading $activeDownloads now. $updateCount pending updates.',
+                'يوجد $activeDownloads قيد التنزيل و $updateCount تحديثات بانتظارك.',
+              ),
+            ),
           ),
           BadgeIcon(
             icon: Icons.notifications_none,
-            count: '3',
-            onTap: () => _showSnack(context, 'You have 3 store alerts.'),
+            count: updateLabel,
+            onTap: () => _showSnack(
+              context,
+              updateCount == 0
+                  ? _t(
+                      context,
+                      'No updates right now.',
+                      'لا يوجد تحديثات الآن.',
+                    )
+                  : _t(
+                      context,
+                      '$updateCount apps have updates.',
+                      '$updateCount تطبيقات تحتاج تحديث.',
+                    ),
+            ),
           ),
           const SizedBox(width: 8),
-          const CircleAvatar(
-            radius: 18,
-            backgroundColor: Color(0xFF263238),
-            child: Text('M', style: TextStyle(color: Colors.white)),
+          ProfileAvatarButton(
+            api: api,
+            session: session,
+            onSessionChanged: onSessionChanged,
           ),
           IconButton(
-            tooltip: 'Settings',
-            onPressed: () => showAppSettingsSheet(context),
+            tooltip: _t(context, 'More', 'المزيد'),
+            onPressed: () => showMoreMenuSheet(context),
             icon: const Icon(Icons.more_vert),
           ),
         ],
@@ -2672,18 +3080,6 @@ class MatjariMark extends StatelessWidget {
               ),
             ),
           ),
-          Positioned(
-            right: size * 0.12,
-            top: size * 0.12,
-            child: Container(
-              width: size * 0.22,
-              height: size * 0.22,
-              decoration: const BoxDecoration(
-                color: Color(0xFFFFC107),
-                shape: BoxShape.circle,
-              ),
-            ),
-          ),
         ],
       ),
     );
@@ -2704,16 +3100,69 @@ class BadgeIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final showBadge = count != '0' && count.trim().isNotEmpty;
     return Tooltip(
       message: 'Open alerts',
       child: IconButton(
         onPressed: onTap,
-        icon: Badge(
-          label: Text(count),
-          backgroundColor: const Color(0xFFD93025),
-          child: Icon(icon, size: 28),
-        ),
+        icon: showBadge
+            ? Badge(
+                label: Text(count),
+                backgroundColor: const Color(0xFFD93025),
+                child: Icon(icon, size: 28),
+              )
+            : Icon(icon, size: 28),
       ),
+    );
+  }
+}
+
+class ProfileAvatarButton extends StatelessWidget {
+  const ProfileAvatarButton({
+    super.key,
+    required this.api,
+    required this.session,
+    required this.onSessionChanged,
+  });
+
+  final MatjariApi api;
+  final AuthSession? session;
+  final ValueChanged<AuthSession> onSessionChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      customBorder: const CircleBorder(),
+      onTap: () => showProfileSheet(
+        context,
+        api: api,
+        session: session,
+        onSessionChanged: onSessionChanged,
+      ),
+      child: _ProfileAvatar(session: session, radius: 18),
+    );
+  }
+}
+
+class _ProfileAvatar extends StatelessWidget {
+  const _ProfileAvatar({required this.session, this.radius = 22});
+
+  final AuthSession? session;
+  final double radius;
+
+  @override
+  Widget build(BuildContext context) {
+    final imageUrl = session?.avatarUrl.trim() ?? '';
+    final fallback = (session?.name.ifEmpty(session?.email ?? '') ?? 'M')
+        .characters
+        .first
+        .toUpperCase();
+    return CircleAvatar(
+      radius: radius,
+      backgroundColor: _brandBlue,
+      foregroundColor: Colors.white,
+      backgroundImage: imageUrl.isEmpty ? null : NetworkImage(imageUrl),
+      child: imageUrl.isEmpty ? Text(fallback) : null,
     );
   }
 }
@@ -3109,7 +3558,9 @@ class SectionHeader extends StatelessWidget {
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 text: TextSpan(
-                  style: const TextStyle(color: _ink),
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurface,
+                  ),
                   children: [
                     if (eyebrow != null)
                       TextSpan(
@@ -4437,10 +4888,14 @@ class _SearchPageState extends State<SearchPage> {
             for (final category
                 in widget.categories.map((item) => item.name).take(12))
               ActionChip(
-                backgroundColor: Colors.white,
-                side: const BorderSide(color: _line),
-                labelStyle: const TextStyle(
-                  color: _ink,
+                backgroundColor: Theme.of(context).colorScheme.surface,
+                side: BorderSide(
+                  color: Theme.of(context).brightness == Brightness.dark
+                      ? const Color(0xFF334155)
+                      : _line,
+                ),
+                labelStyle: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurface,
                   fontWeight: FontWeight.w700,
                 ),
                 label: Text(category),
@@ -4585,12 +5040,14 @@ class BooksPage extends StatelessWidget {
   }
 }
 
-class YouPage extends StatelessWidget {
+class YouPage extends StatefulWidget {
   const YouPage({
     super.key,
     required this.api,
     required this.items,
     required this.session,
+    required this.activeDownloads,
+    required this.updateCount,
     required this.onSessionChanged,
     required this.onLogout,
     required this.onItemSelected,
@@ -4605,6 +5062,8 @@ class YouPage extends StatelessWidget {
   final MatjariApi api;
   final List<StoreItem> items;
   final AuthSession? session;
+  final int activeDownloads;
+  final int updateCount;
   final ValueChanged<AuthSession> onSessionChanged;
   final VoidCallback onLogout;
   final ValueChanged<StoreItem> onItemSelected;
@@ -4616,135 +5075,289 @@ class YouPage extends StatelessWidget {
   final ValueChanged<StoreItem> onUninstall;
 
   @override
+  State<YouPage> createState() => _YouPageState();
+}
+
+class _YouPageState extends State<YouPage> {
+  late Future<StorageInfo?> _storageFuture;
+  int _tabIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _storageFuture = _deviceStorageInfo();
+  }
+
+  void _refreshStorage() {
+    setState(() {
+      _storageFuture = _deviceStorageInfo();
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final installed = items.where(canUninstall).toList();
+    final installed = widget.items.where(widget.canUninstall).toList();
     final visibleInstalled = installed.isEmpty
-        ? items.take(4).toList()
+        ? widget.items.take(4).toList()
         : installed;
+    final updates = widget.items
+        .where((item) => item.forceUpdate || item.updateAvailable)
+        .toList();
+
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
       children: [
         Row(
           children: [
-            const Expanded(
+            Expanded(
               child: Text(
-                'You',
+                _t(context, 'You', 'أنت'),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800),
+                style: const TextStyle(
+                  fontSize: 26,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
             ),
             IconButton(
-              tooltip: 'Refresh',
-              onPressed: onRefresh,
+              tooltip: _t(context, 'Refresh', 'تحديث'),
+              onPressed: () {
+                widget.onRefresh();
+                _refreshStorage();
+              },
               icon: const Icon(Icons.refresh),
             ),
             IconButton(
-              tooltip: 'Settings',
-              onPressed: () => showAppSettingsSheet(context),
+              tooltip: _t(context, 'More', 'المزيد'),
+              onPressed: () => showMoreMenuSheet(context),
               icon: const Icon(Icons.more_vert),
             ),
           ],
         ),
         const SizedBox(height: 18),
-        AccountSummaryCard(session: session, onLogout: onLogout),
+        AccountSummaryCard(
+          session: widget.session,
+          onLogout: widget.onLogout,
+          api: widget.api,
+          onSessionChanged: widget.onSessionChanged,
+        ),
         const SizedBox(height: 22),
-        OverviewRow(
-          icon: Icons.verified_user_outlined,
-          title: 'Your device is protected',
-          subtitle: 'No harmful apps found',
-          action: 'Details',
-          color: Color(0xFF188038),
-          onTap: () => _showSnack(context, 'Device protection looks good.'),
-        ),
-        OverviewRow(
-          icon: Icons.system_update_alt,
-          title: 'Updates available',
-          subtitle:
-              '${items.where((item) => item.forceUpdate || item.updateAvailable).length} apps need attention',
-          action: 'Refresh',
-          color: Color(0xFFF29900),
-          onTap: onRefresh,
-        ),
-        OverviewRow(
-          icon: Icons.storage_outlined,
-          title: 'Storage',
-          subtitle: 'Review installed apps and remove what you do not need',
-          action: 'Manage',
-          color: _brandBlue,
-          onTap: () => showFullListPage(
-            context: context,
-            title: 'Installed apps',
-            items: visibleInstalled,
-            onItemSelected: onItemSelected,
-            actionLabelFor: actionLabelFor,
-            progressFor: progressFor,
-            canUninstall: canUninstall,
-            onAction: onAction,
-            onUninstall: onUninstall,
-          ),
-        ),
-        OverviewRow(
-          icon: Icons.rate_review_outlined,
-          title: 'Your contributions',
-          subtitle: 'Reviews help people trust the store',
-          action: 'Write review',
-          color: Color(0xFF6C3DD9),
-          onTap: () =>
-              _showSnack(context, 'Open an app page to write a review.'),
-        ),
-        OverviewRow(
-          icon: Icons.info_outline,
-          title: 'App settings',
-          subtitle: 'Version, API, privacy, and store information',
-          action: 'Settings',
-          color: Color(0xFF455A64),
-          onTap: () => showAppSettingsSheet(context),
-        ),
-        if (session?.role == 'admin') ...[
-          FilledButton.icon(
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => AdminDashboardPage(
-                  api: api,
-                  apps: items.where((item) => item.type != 'books').toList(),
-                  session: session!,
-                  onChanged: onRefresh,
+        SegmentedButton<int>(
+          segments: [
+            ButtonSegment(
+              value: 0,
+              icon: const Icon(Icons.dashboard_outlined),
+              label: Text(_t(context, 'Overview', 'نظرة عامة')),
+            ),
+            ButtonSegment(
+              value: 1,
+              icon: const Icon(Icons.apps_outlined),
+              label: Text(
+                _t(
+                  context,
+                  'Installed (${visibleInstalled.length})',
+                  'المثبتة (${visibleInstalled.length})',
                 ),
               ),
             ),
-            icon: const Icon(Icons.admin_panel_settings_outlined),
-            label: const Text('Admin dashboard'),
-          ),
-          const SizedBox(height: 18),
-        ],
-        const SizedBox(height: 26),
-        SectionHeader(
-          title: 'Installed apps (${visibleInstalled.length})',
-          onSeeMore: () => showFullListPage(
-            context: context,
-            title: 'Installed apps',
-            items: visibleInstalled,
-            onItemSelected: onItemSelected,
-            actionLabelFor: actionLabelFor,
-            progressFor: progressFor,
-            canUninstall: canUninstall,
-            onAction: onAction,
-            onUninstall: onUninstall,
-          ),
+          ],
+          selected: {_tabIndex},
+          onSelectionChanged: (value) =>
+              setState(() => _tabIndex = value.first),
         ),
-        const SizedBox(height: 10),
-        for (final item in visibleInstalled)
-          AppListTile(
-            item: item,
-            onTap: () => onItemSelected(item),
-            actionLabel: actionLabelFor(item),
-            progress: progressFor(item),
-            canUninstall: canUninstall(item),
-            onAction: () => onAction(item),
-            onUninstall: () => onUninstall(item),
+        const SizedBox(height: 20),
+        if (_tabIndex == 0) ...[
+          _updatesCard(updates),
+          const SizedBox(height: 16),
+          _storageCard(visibleInstalled),
+          const SizedBox(height: 18),
+          OverviewRow(
+            icon: Icons.info_outline,
+            title: _t(context, 'About app', 'حول التطبيق'),
+            subtitle:
+                'Matjari $_appVersionName+$_appBuildNumber - $_apiBaseUrl',
+            action: _t(context, 'Open', 'فتح'),
+            color: const Color(0xFF455A64),
+            onTap: () => showAppSettingsSheet(context),
           ),
+          if (widget.session?.role == 'admin') ...[
+            AdminEntryCard(
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => AdminDashboardPage(
+                    api: widget.api,
+                    apps: widget.items
+                        .where((item) => item.type != 'books')
+                        .toList(),
+                    session: widget.session!,
+                    onChanged: widget.onRefresh,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 18),
+          ],
+        ] else ...[
+          SectionHeader(
+            title: _t(
+              context,
+              'Installed apps (${visibleInstalled.length})',
+              'التطبيقات المثبتة (${visibleInstalled.length})',
+            ),
+            onSeeMore: () => showFullListPage(
+              context: context,
+              title: _t(context, 'Installed apps', 'التطبيقات المثبتة'),
+              items: visibleInstalled,
+              onItemSelected: widget.onItemSelected,
+              actionLabelFor: widget.actionLabelFor,
+              progressFor: widget.progressFor,
+              canUninstall: widget.canUninstall,
+              onAction: widget.onAction,
+              onUninstall: widget.onUninstall,
+            ),
+          ),
+          const SizedBox(height: 10),
+          for (final item in visibleInstalled)
+            AppListTile(
+              item: item,
+              onTap: () => widget.onItemSelected(item),
+              actionLabel: widget.actionLabelFor(item),
+              progress: widget.progressFor(item),
+              canUninstall: widget.canUninstall(item),
+              onAction: () => widget.onAction(item),
+              onUninstall: () => widget.onUninstall(item),
+            ),
+        ],
       ],
+    );
+  }
+
+  Widget _updatesCard(List<StoreItem> updates) {
+    final count = widget.updateCount;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFFBEB),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFF4D98A)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.system_update_alt, color: Color(0xFFF29900)),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _t(context, 'Updater available', 'التحديثات المتاحة'),
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _t(
+                    context,
+                    '$count apps need updates. ${widget.activeDownloads} downloads running.',
+                    '$count تطبيقات تحتاج تحديث. ${widget.activeDownloads} تنزيلات تعمل الآن.',
+                  ),
+                  style: const TextStyle(color: _muted),
+                ),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: updates.isEmpty
+                ? widget.onRefresh
+                : () => showFullListPage(
+                    context: context,
+                    title: _t(context, 'Updates', 'التحديثات'),
+                    items: updates,
+                    onItemSelected: widget.onItemSelected,
+                    actionLabelFor: widget.actionLabelFor,
+                    progressFor: widget.progressFor,
+                    canUninstall: widget.canUninstall,
+                    onAction: widget.onAction,
+                    onUninstall: widget.onUninstall,
+                  ),
+            child: Text(_t(context, 'Details', 'تفاصيل')),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _storageCard(List<StoreItem> visibleInstalled) {
+    return FutureBuilder<StorageInfo?>(
+      future: _storageFuture,
+      builder: (context, snapshot) {
+        final storage = snapshot.data;
+        final ratio = storage?.usedRatio ?? 0.0;
+        final subtitle = storage == null
+            ? _t(
+                context,
+                'Storage details are available on Android after refresh.',
+                'تفاصيل التخزين تظهر على أندرويد بعد التحديث.',
+              )
+            : '${_formatBytes(storage.usedBytes)} ${_t(context, 'of', 'من')} ${_formatBytes(storage.totalBytes)} ${_t(context, 'used', 'مستخدمة')}';
+        return Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surface,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: _line),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.storage_outlined, color: _brandBlue),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      _t(context, 'Storage', 'التخزين'),
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => showFullListPage(
+                      context: context,
+                      title: _t(context, 'Installed apps', 'التطبيقات المثبتة'),
+                      items: visibleInstalled,
+                      onItemSelected: widget.onItemSelected,
+                      actionLabelFor: widget.actionLabelFor,
+                      progressFor: widget.progressFor,
+                      canUninstall: widget.canUninstall,
+                      onAction: widget.onAction,
+                      onUninstall: widget.onUninstall,
+                    ),
+                    child: Text(_t(context, 'Manage', 'إدارة')),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(subtitle, style: const TextStyle(color: _muted)),
+              const SizedBox(height: 12),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: LinearProgressIndicator(
+                  value: ratio,
+                  minHeight: 10,
+                  backgroundColor: const Color(0xFFE8EEF6),
+                  color: ratio > .9 ? const Color(0xFFD93025) : _brandBlue,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -5052,29 +5665,40 @@ class AccountSummaryCard extends StatelessWidget {
     super.key,
     required this.session,
     required this.onLogout,
+    required this.api,
+    required this.onSessionChanged,
   });
 
   final AuthSession? session;
   final VoidCallback onLogout;
+  final MatjariApi api;
+  final ValueChanged<AuthSession> onSessionChanged;
 
   @override
   Widget build(BuildContext context) {
     final current = session;
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFFE8F2FF),
+        color: Theme.of(context).brightness == Brightness.dark
+            ? const Color(0xFF12213A)
+            : const Color(0xFFE8F2FF),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: const Color(0xFFC9DCF8)),
       ),
       child: Row(
         children: [
-          CircleAvatar(
-            backgroundColor: _brandBlue,
-            foregroundColor: Colors.white,
-            child: Text((current?.name ?? 'M').characters.first),
+          InkWell(
+            customBorder: const CircleBorder(),
+            onTap: () => showProfileSheet(
+              context,
+              api: api,
+              session: current,
+              onSessionChanged: onSessionChanged,
+            ),
+            child: _ProfileAvatar(session: current, radius: 30),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 14),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -5085,8 +5709,15 @@ class AccountSummaryCard extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(fontWeight: FontWeight.w900),
                 ),
+                const SizedBox(height: 3),
                 Text(
-                  '${current?.role ?? 'user'} - ${current?.email ?? ''}',
+                  current == null
+                      ? _t(context, 'Not signed in', 'غير مسجل الدخول')
+                      : _t(
+                          context,
+                          'Logged in as ${current.role} - ${current.email}',
+                          'مسجل كـ ${current.role} - ${current.email}',
+                        ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(color: _muted, fontSize: 12),
@@ -5094,8 +5725,66 @@ class AccountSummaryCard extends StatelessWidget {
               ],
             ),
           ),
-          OutlinedButton(onPressed: onLogout, child: const Text('Logout')),
+          OutlinedButton(
+            onPressed: onLogout,
+            child: Text(_t(context, 'Logout', 'خروج')),
+          ),
         ],
+      ),
+    );
+  }
+}
+
+class AdminEntryCard extends StatelessWidget {
+  const AdminEntryCard({super.key, required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0xFF0F766E),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          children: [
+            const Icon(
+              Icons.admin_panel_settings_outlined,
+              color: Colors.white,
+              size: 34,
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _t(context, 'Admin mode active', 'وضع الأدمن مفعل'),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  Text(
+                    _t(
+                      context,
+                      'Manage apps, updates, uploads, and users.',
+                      'إدارة التطبيقات والتحديثات والرفع والمستخدمين.',
+                    ),
+                    style: const TextStyle(color: Color(0xFFD9FFF9)),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.arrow_forward, color: Colors.white),
+          ],
+        ),
       ),
     );
   }
@@ -5118,10 +5807,20 @@ class AdminDashboardPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Admin dashboard')),
+      appBar: AppBar(
+        title: const Text('Admin dashboard'),
+        actions: const [
+          Padding(
+            padding: EdgeInsetsDirectional.only(end: 12),
+            child: Icon(Icons.verified_user, color: _brandBlue),
+          ),
+        ],
+      ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
         children: [
+          AdminIdentityBanner(session: session),
+          const SizedBox(height: 18),
           const SectionHeader(
             title: 'Manage applications',
             subtitle: 'Upload, edit, update, and review store listings.',
@@ -5150,6 +5849,15 @@ class AdminDashboardPage extends StatelessWidget {
                 ),
                 icon: const Icon(Icons.bar_chart),
                 label: const Text('Analytics'),
+              ),
+              OutlinedButton.icon(
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => AdminUsersPage(api: api, session: session),
+                  ),
+                ),
+                icon: const Icon(Icons.group_outlined),
+                label: const Text('Users'),
               ),
             ],
           ),
@@ -5183,6 +5891,444 @@ class AdminDashboardPage extends StatelessWidget {
       ),
     );
   }
+}
+
+class AdminIdentityBanner extends StatelessWidget {
+  const AdminIdentityBanner({super.key, required this.session});
+
+  final AuthSession session;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0B3D5C),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          _ProfileAvatar(session: session, radius: 28),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'You are managing Matjari as admin',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                Text(
+                  '${session.username.ifEmpty(session.email)} - apps, users, uploads, and releases',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Color(0xFFD7EEFF)),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class AdminUsersPage extends StatefulWidget {
+  const AdminUsersPage({super.key, required this.api, required this.session});
+
+  final MatjariApi api;
+  final AuthSession session;
+
+  @override
+  State<AdminUsersPage> createState() => _AdminUsersPageState();
+}
+
+class _AdminUsersPageState extends State<AdminUsersPage> {
+  late Future<List<AdminUser>> _usersFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _usersFuture = widget.api.fetchUsers(widget.session.token);
+  }
+
+  void _refresh() {
+    setState(() {
+      _usersFuture = widget.api.fetchUsers(widget.session.token);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Users'),
+        actions: [
+          IconButton(
+            tooltip: 'Refresh users',
+            onPressed: _refresh,
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
+      ),
+      body: FutureBuilder<List<AdminUser>>(
+        future: _usersFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            return Center(child: Text(snapshot.error.toString()));
+          }
+
+          final users = snapshot.data ?? const <AdminUser>[];
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+            children: [
+              const SectionHeader(
+                title: 'User management',
+                subtitle:
+                    'Edit accounts, block access, delete users, or promote trusted users to admin.',
+              ),
+              const SizedBox(height: 14),
+              if (users.isEmpty)
+                const Text('No users yet.', style: TextStyle(color: _muted))
+              else
+                for (final user in users)
+                  AdminUserRow(
+                    user: user,
+                    currentSession: widget.session,
+                    onEdit: () => _showAdminUserSheet(
+                      context,
+                      api: widget.api,
+                      session: widget.session,
+                      user: user,
+                      onSaved: _refresh,
+                    ),
+                    onDelete: () => _deleteUser(user),
+                    onRoleToggle: () => _toggleRole(user),
+                  ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _deleteUser(AdminUser user) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete user'),
+        content: Text('Delete ${user.fullName.ifEmpty(user.email)}?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      await widget.api.deleteUser(token: widget.session.token, user: user);
+      _refresh();
+      if (mounted) _showSnack(context, 'User deleted.');
+    } catch (error) {
+      if (mounted) _showSnack(context, error.toString());
+    }
+  }
+
+  Future<void> _toggleRole(AdminUser user) async {
+    final promote = user.role != 'admin';
+    if (promote) {
+      final verified = await _confirmAdminPromotionOtp(context, widget.api);
+      if (verified != true) return;
+    }
+
+    try {
+      await widget.api.promoteUser(
+        token: widget.session.token,
+        user: user,
+        admin: promote,
+      );
+      _refresh();
+      if (mounted) {
+        _showSnack(
+          context,
+          promote ? 'User promoted to admin.' : 'Admin removed.',
+        );
+      }
+    } catch (error) {
+      if (mounted) _showSnack(context, error.toString());
+    }
+  }
+}
+
+class AdminUserRow extends StatelessWidget {
+  const AdminUserRow({
+    super.key,
+    required this.user,
+    required this.currentSession,
+    required this.onEdit,
+    required this.onDelete,
+    required this.onRoleToggle,
+  });
+
+  final AdminUser user;
+  final AuthSession currentSession;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+  final VoidCallback onRoleToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final isCurrentUser = currentSession.email == user.email;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        border: Border.all(
+          color: user.blocked ? const Color(0xFFD93025) : _line,
+        ),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            backgroundColor: user.role == 'admin'
+                ? const Color(0xFF0F766E)
+                : _brandBlue,
+            backgroundImage: user.avatarUrl.isEmpty
+                ? null
+                : NetworkImage(user.avatarUrl),
+            foregroundColor: Colors.white,
+            child: user.avatarUrl.isEmpty
+                ? Text(user.fullName.ifEmpty(user.username).characters.first)
+                : null,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  user.fullName.ifEmpty(user.username).ifEmpty(user.email),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w900),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  '${user.role}${user.blocked ? ' - blocked' : ''} - ${user.email}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: _muted, fontSize: 12),
+                ),
+                Text(
+                  '${user.username} - ${user.phoneNumber}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: _muted, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                tooltip: 'Edit user',
+                onPressed: onEdit,
+                icon: const Icon(Icons.edit_outlined),
+              ),
+              IconButton(
+                tooltip: user.role == 'admin' ? 'Remove admin' : 'Make admin',
+                onPressed: isCurrentUser ? null : onRoleToggle,
+                icon: Icon(
+                  user.role == 'admin'
+                      ? Icons.admin_panel_settings
+                      : Icons.admin_panel_settings_outlined,
+                ),
+              ),
+              IconButton(
+                tooltip: 'Delete user',
+                onPressed: isCurrentUser ? null : onDelete,
+                icon: const Icon(Icons.delete_outline),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+void _showAdminUserSheet(
+  BuildContext context, {
+  required MatjariApi api,
+  required AuthSession session,
+  required AdminUser user,
+  required VoidCallback onSaved,
+}) {
+  final nameController = TextEditingController(text: user.fullName);
+  final usernameController = TextEditingController(text: user.username);
+  final emailController = TextEditingController(text: user.email);
+  final phoneController = TextEditingController(text: user.phoneNumber);
+  final passwordController = TextEditingController();
+  var blocked = user.blocked;
+  var saving = false;
+
+  showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    showDragHandle: true,
+    builder: (sheetContext) => StatefulBuilder(
+      builder: (sheetContext, setSheetState) => Padding(
+        padding: EdgeInsets.fromLTRB(
+          20,
+          6,
+          20,
+          20 + MediaQuery.of(sheetContext).viewInsets.bottom,
+        ),
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            const Text(
+              'Edit user',
+              style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: nameController,
+              decoration: const InputDecoration(labelText: 'Name'),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: usernameController,
+              decoration: const InputDecoration(labelText: 'Name ID'),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: emailController,
+              keyboardType: TextInputType.emailAddress,
+              decoration: const InputDecoration(labelText: 'Email'),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: phoneController,
+              keyboardType: TextInputType.phone,
+              decoration: const InputDecoration(labelText: 'Phone number'),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: passwordController,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'New password',
+                helperText: 'Leave empty to keep current password',
+              ),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Block user'),
+              subtitle: const Text('Blocked users cannot login.'),
+              value: blocked,
+              onChanged: (value) => setSheetState(() => blocked = value),
+            ),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: saving
+                  ? null
+                  : () async {
+                      setSheetState(() => saving = true);
+                      try {
+                        await api.updateUser(
+                          token: session.token,
+                          user: user,
+                          email: emailController.text.trim(),
+                          username: usernameController.text.trim(),
+                          fullName: nameController.text.trim(),
+                          phoneNumber: phoneController.text.trim(),
+                          password: passwordController.text,
+                          blocked: blocked,
+                        );
+                        onSaved();
+                        if (context.mounted) {
+                          Navigator.pop(sheetContext);
+                          _showSnack(context, 'User saved.');
+                        }
+                      } catch (error) {
+                        if (context.mounted) {
+                          _showSnack(context, error.toString());
+                        }
+                      } finally {
+                        if (sheetContext.mounted) {
+                          setSheetState(() => saving = false);
+                        }
+                      }
+                    },
+              icon: const Icon(Icons.save_outlined),
+              label: Text(saving ? 'Saving' : 'Save'),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+Future<bool?> _confirmAdminPromotionOtp(
+  BuildContext context,
+  MatjariApi api,
+) async {
+  final otp = (100000 + (DateTime.now().millisecondsSinceEpoch % 900000))
+      .toString();
+  final sent = await api.sendWhatsAppOtp(
+    numberphone: '+96176652276',
+    message: 'Matjari admin permission OTP: $otp',
+  );
+  if (context.mounted) {
+    _showSnack(
+      context,
+      sent ? 'Admin OTP sent to 76652276.' : 'Admin OTP for testing: $otp.',
+    );
+  }
+
+  final controller = TextEditingController();
+  if (!context.mounted) return false;
+  return showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Admin OTP required'),
+      content: TextField(
+        controller: controller,
+        keyboardType: TextInputType.number,
+        decoration: const InputDecoration(labelText: 'OTP'),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () =>
+              Navigator.pop(context, controller.text.trim() == otp),
+          child: const Text('Verify'),
+        ),
+      ],
+    ),
+  );
 }
 
 class AdminAnalyticsPage extends StatelessWidget {
@@ -5995,64 +7141,285 @@ void showFullListPage({
   );
 }
 
-void showAppSettingsSheet(BuildContext context) {
+void showMoreMenuSheet(BuildContext context) {
   showModalBottomSheet<void>(
     context: context,
     showDragHandle: true,
-    builder: (context) => SafeArea(
+    builder: (sheetContext) => SafeArea(
+      child: ListView(
+        shrinkWrap: true,
+        padding: const EdgeInsets.fromLTRB(20, 6, 20, 24),
+        children: [
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.settings_outlined),
+            title: Text(_t(context, 'Settings', 'الإعدادات')),
+            subtitle: Text(
+              _t(
+                context,
+                'Language, theme, and app information',
+                'اللغة والثيم ومعلومات التطبيق',
+              ),
+            ),
+            onTap: () {
+              Navigator.pop(sheetContext);
+              showAppSettingsSheet(context);
+            },
+          ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.help_outline),
+            title: Text(
+              _t(context, 'Help and feedback', 'المساعدة والملاحظات'),
+            ),
+            subtitle: const Text(_supportEmail),
+            onTap: () {
+              Navigator.pop(sheetContext);
+              showHelpFeedbackSheet(context);
+            },
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+void showProfileSheet(
+  BuildContext context, {
+  required MatjariApi api,
+  required AuthSession? session,
+  required ValueChanged<AuthSession> onSessionChanged,
+}) {
+  final current = session;
+  if (current == null) {
+    _showSnack(context, _t(context, 'No active account.', 'لا يوجد حساب نشط.'));
+    return;
+  }
+
+  final nameController = TextEditingController(text: current.name);
+  final avatarController = TextEditingController(text: current.avatarUrl);
+  var saving = false;
+
+  showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    showDragHandle: true,
+    builder: (sheetContext) => StatefulBuilder(
+      builder: (sheetContext, setSheetState) {
+        final avatarUrl = avatarController.text.trim();
+        return SafeArea(
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(
+              20,
+              6,
+              20,
+              20 + MediaQuery.of(sheetContext).viewInsets.bottom,
+            ),
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 34,
+                      backgroundColor: _brandBlue,
+                      backgroundImage: avatarUrl.isEmpty
+                          ? null
+                          : NetworkImage(avatarUrl),
+                      child: avatarUrl.isEmpty
+                          ? Text(
+                              current.name.characters.first.toUpperCase(),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 24,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            )
+                          : null,
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            current.email,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                          Text(
+                            _t(
+                              context,
+                              'Manage your Google account style profile',
+                              'إدارة شكل حسابك داخل المتجر',
+                            ),
+                            style: const TextStyle(color: _muted),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                TextField(
+                  controller: nameController,
+                  decoration: InputDecoration(
+                    labelText: _t(context, 'Display name', 'الاسم الظاهر'),
+                    prefixIcon: const Icon(Icons.badge_outlined),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: avatarController,
+                  onChanged: (_) => setSheetState(() {}),
+                  decoration: InputDecoration(
+                    labelText: _t(
+                      context,
+                      'Profile picture URL',
+                      'رابط صورة الحساب',
+                    ),
+                    prefixIcon: const Icon(Icons.image_outlined),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                FilledButton.icon(
+                  onPressed: saving
+                      ? null
+                      : () async {
+                          setSheetState(() => saving = true);
+                          try {
+                            final next = await api.updateProfile(
+                              session: current,
+                              fullName: nameController.text.trim().ifEmpty(
+                                current.name,
+                              ),
+                              avatarUrl: avatarController.text.trim(),
+                            );
+                            onSessionChanged(next);
+                            if (context.mounted) {
+                              Navigator.pop(sheetContext);
+                              _showSnack(
+                                context,
+                                _t(
+                                  context,
+                                  'Profile updated.',
+                                  'تم تحديث الحساب.',
+                                ),
+                              );
+                            }
+                          } catch (error) {
+                            if (context.mounted) {
+                              _showSnack(context, error.toString());
+                            }
+                          } finally {
+                            if (sheetContext.mounted) {
+                              setSheetState(() => saving = false);
+                            }
+                          }
+                        },
+                  icon: const Icon(Icons.save_outlined),
+                  label: Text(
+                    saving
+                        ? _t(context, 'Saving', 'جار الحفظ')
+                        : _t(context, 'Save profile', 'حفظ الحساب'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    ),
+  );
+}
+
+void showHelpFeedbackSheet(BuildContext context) {
+  showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    builder: (sheetContext) => SafeArea(
       child: ListView(
         shrinkWrap: true,
         padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
         children: [
-          const Row(
-            children: [
-              MatjariMark(size: 52),
-              SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Matjari',
-                      style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    Text(
-                      'Private Android app store',
-                      style: TextStyle(color: _muted),
-                    ),
-                  ],
-                ),
-              ),
-            ],
+          Text(
+            _t(context, 'Help and feedback', 'المساعدة والملاحظات'),
+            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
           ),
-          const SizedBox(height: 18),
-          const DetailsRow(label: 'Version', value: _appVersionName),
-          const DetailsRow(label: 'Build', value: '$_appBuildNumber'),
-          const DetailsRow(label: 'API', value: _apiBaseUrl),
-          const DetailsRow(label: 'Install mode', value: 'Direct APK'),
+          const SizedBox(height: 10),
+          Text(
+            _t(
+              context,
+              'Send bugs, APK upload issues, account problems, and feature ideas.',
+              'أرسل مشاكل التنزيل، رفع APK، الحسابات، وأفكار تطوير المتجر.',
+            ),
+            style: const TextStyle(color: _muted),
+          ),
           const SizedBox(height: 12),
           ListTile(
             contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.privacy_tip_outlined),
-            title: const Text('Privacy'),
-            subtitle: const Text(
-              'OTP sign-in and library sync are used for your store account.',
+            leading: const Icon(Icons.mail_outline, color: _brandBlue),
+            title: const Text(_supportEmail),
+            subtitle: Text(
+              _t(
+                context,
+                'Long press or tap to open your email app',
+                'اضغط أو اضغط مطولاً لفتح تطبيق البريد',
+              ),
             ),
-            onTap: () => _showSnack(context, 'Privacy information opened.'),
+            onTap: () async {
+              final opened = await _openSupportEmail();
+              if (!context.mounted) return;
+              _showSnack(
+                context,
+                opened
+                    ? _t(context, 'Email app opened.', 'تم فتح البريد.')
+                    : _t(
+                        context,
+                        'Could not open email app.',
+                        'تعذر فتح تطبيق البريد.',
+                      ),
+              );
+            },
+            onLongPress: () async {
+              final opened = await _openSupportEmail();
+              if (!context.mounted) return;
+              _showSnack(
+                context,
+                opened
+                    ? _t(context, 'Email app opened.', 'تم فتح البريد.')
+                    : _t(
+                        context,
+                        'Could not open email app.',
+                        'تعذر فتح تطبيق البريد.',
+                      ),
+              );
+            },
+          ),
+          const Divider(),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.android_outlined),
+            title: Text(_t(context, 'APK support', 'دعم ملفات APK')),
+            subtitle: Text(
+              _t(
+                context,
+                'Include app name, version, package name, and what happened.',
+                'اذكر اسم التطبيق والإصدار واسم الحزمة والمشكلة.',
+              ),
+            ),
           ),
           ListTile(
             contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.info_outline),
-            title: const Text('About Matjari'),
-            subtitle: const Text(
-              'Designed for private APK distribution without Play Store publishing.',
-            ),
-            onTap: () => _showSnack(
-              context,
-              'Matjari version $_appVersionName+$_appBuildNumber.',
+            leading: const Icon(Icons.security_outlined),
+            title: Text(_t(context, 'Account support', 'دعم الحساب')),
+            subtitle: Text(
+              _t(
+                context,
+                'For OTP or login issues, include your email and phone number.',
+                'لمشاكل OTP أو الدخول، اذكر الإيميل ورقم الهاتف.',
+              ),
             ),
           ),
         ],
@@ -6061,9 +7428,147 @@ void showAppSettingsSheet(BuildContext context) {
   );
 }
 
+void showAppSettingsSheet(BuildContext context) {
+  final settings = MatjariSettingsScope.of(context);
+  var selectedLanguage = settings.language;
+  var selectedThemeMode = settings.themeMode;
+  showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    builder: (sheetContext) => StatefulBuilder(
+      builder: (sheetContext, setSheetState) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+          children: [
+            Row(
+              children: [
+                const MatjariMark(size: 52),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Matjari',
+                        style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      Text(
+                        _t(
+                          context,
+                          'Private Android app store',
+                          'متجر تطبيقات أندرويد خاص',
+                        ),
+                        style: const TextStyle(color: _muted),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            SegmentedButton<AppLanguage>(
+              segments: const [
+                ButtonSegment(value: AppLanguage.en, label: Text('English')),
+                ButtonSegment(value: AppLanguage.ar, label: Text('العربية')),
+              ],
+              selected: {selectedLanguage},
+              onSelectionChanged: (value) {
+                final next = value.first;
+                selectedLanguage = next;
+                settings.setLanguage(next);
+                setSheetState(() {});
+              },
+            ),
+            const SizedBox(height: 12),
+            SegmentedButton<ThemeMode>(
+              segments: [
+                ButtonSegment(
+                  value: ThemeMode.light,
+                  icon: const Icon(Icons.light_mode_outlined),
+                  label: Text(_t(context, 'Light', 'فاتح')),
+                ),
+                ButtonSegment(
+                  value: ThemeMode.dark,
+                  icon: const Icon(Icons.dark_mode_outlined),
+                  label: Text(_t(context, 'Dark', 'داكن')),
+                ),
+              ],
+              selected: {selectedThemeMode},
+              onSelectionChanged: (value) {
+                final next = value.first;
+                selectedThemeMode = next;
+                settings.setThemeMode(next);
+                setSheetState(() {});
+              },
+            ),
+            const SizedBox(height: 18),
+            DetailsRow(
+              label: _t(context, 'Version', 'الإصدار'),
+              value: _appVersionName,
+            ),
+            DetailsRow(
+              label: _t(context, 'Build', 'البناء'),
+              value: '$_appBuildNumber',
+            ),
+            DetailsRow(label: 'API', value: _apiBaseUrl),
+            DetailsRow(
+              label: _t(context, 'Install mode', 'طريقة التثبيت'),
+              value: _t(context, 'Direct APK', 'APK مباشر'),
+            ),
+            const SizedBox(height: 12),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.privacy_tip_outlined),
+              title: Text(_t(context, 'Privacy', 'الخصوصية')),
+              subtitle: Text(
+                _t(
+                  context,
+                  'OTP sign-in and library sync are used for your store account.',
+                  'نستخدم OTP ومزامنة المكتبة لحساب المتجر فقط.',
+                ),
+              ),
+              onTap: () => _showSnack(
+                context,
+                _t(
+                  context,
+                  'Privacy information opened.',
+                  'تم فتح معلومات الخصوصية.',
+                ),
+              ),
+            ),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.info_outline),
+              title: Text(_t(context, 'About Matjari', 'حول متجري')),
+              subtitle: Text(
+                _t(
+                  context,
+                  'Designed for private APK distribution without Play Store publishing.',
+                  'مصمم لتوزيع APK خاص بدون النشر على Play Store.',
+                ),
+              ),
+              onTap: () => _showSnack(
+                context,
+                'Matjari version $_appVersionName+$_appBuildNumber.',
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
 String _defaultActionText(StoreItem item) {
   if (item.updateAvailable) return 'Update';
   if (item.installed) return 'Open';
+  if (item.type != 'books' && (item.fileUrl?.trim().isEmpty ?? true)) {
+    return 'Preview';
+  }
   if (item.type == 'books' && item.price != null) return item.price!;
   return 'Download';
 }

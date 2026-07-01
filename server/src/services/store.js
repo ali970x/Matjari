@@ -61,12 +61,22 @@ async function seedIfNeeded() {
       email: 'admin@matjari.local',
       username: env.adminUsername,
       full_name: 'Matjari Admin',
-      phone_number: '+96100000000',
+      phone_number: '+96176652276',
       avatar_url: '',
       password_hash: await bcrypt.hash(env.adminPassword, 10),
       role: 'admin',
+      blocked: false,
       created_at: now(),
     });
+  }
+
+  for (const user of state.users) {
+    if (user.role === 'admin' && user.username === env.adminUsername) {
+      if (!user.phone_number || user.phone_number === '+96100000000') {
+        user.phone_number = '+96176652276';
+      }
+      if (user.blocked === undefined) user.blocked = false;
+    }
   }
 
   if (state.categories.length === 0) {
@@ -99,7 +109,7 @@ async function seedIfNeeded() {
 
   ensureAppSeed({
     name: 'ChatGPT',
-    description: 'Write, learn, plan, and explore ideas with an AI assistant.',
+    description: 'A polished AI assistant listing for writing, planning, learning, and everyday productivity.',
     package_name: 'com.openai.chatgpt',
     platform: 'android',
     category_id: appsCategory.id,
@@ -112,7 +122,7 @@ async function seedIfNeeded() {
 
   ensureAppSeed({
     name: 'TikTok - Videos, Shop & LIVE',
-    description: 'Short videos, creators, shops, and live moments in one place.',
+    description: 'Creator videos, live moments, shopping discovery, and social entertainment in a familiar listing.',
     package_name: 'com.zhiliaoapp.musically',
     platform: 'android',
     category_id: appsCategory.id,
@@ -125,7 +135,7 @@ async function seedIfNeeded() {
 
   ensureAppSeed({
     name: 'Alibaba.com - B2B marketplace',
-    description: 'Source products, compare suppliers, and manage orders.',
+    description: 'A marketplace showcase for suppliers, product sourcing, trade deals, and business ordering.',
     package_name: 'com.alibaba.intl.android.apps.poseidon',
     platform: 'android',
     category_id: appsCategory.id,
@@ -138,7 +148,7 @@ async function seedIfNeeded() {
 
   ensureAppSeed({
     name: 'Clash of Clans',
-    description: 'Build, battle, and defend your village with your clan.',
+    description: 'A strategy game showcase with villages, clans, upgrades, and fast battle discovery.',
     package_name: 'com.supercell.clashofclans',
     platform: 'android',
     category_id: gamesCategory.id,
@@ -151,8 +161,8 @@ async function seedIfNeeded() {
 
   ensureAppSeed({
     name: 'War Drone: 3D Shooting Games',
-    description: 'Deploy drones and protect troops in fast missions.',
-    package_name: 'com.matjari.demo.wardrone',
+    description: 'A cinematic action listing with aerial missions, tactical objectives, and 3D combat visuals.',
+    package_name: 'com.skyforge.wardrone',
     platform: 'android',
     category_id: gamesCategory.id,
     subcategory_id: action.id,
@@ -164,7 +174,7 @@ async function seedIfNeeded() {
 
   ensureAppSeed({
     name: 'RFS - Real Flight Simulator',
-    description: 'Pilot aircraft and land at airports around the world.',
+    description: 'A simulator showcase for aircraft, airports, routes, and realistic flight sessions.',
     package_name: 'it.rortos.realflightsimulator',
     platform: 'android',
     category_id: gamesCategory.id,
@@ -177,7 +187,7 @@ async function seedIfNeeded() {
 
   ensureAppSeed({
     name: 'Project Hail Mary: A Novel',
-    description: 'A survival story across space, memory, and impossible odds.',
+    description: 'A premium ebook listing with strong cover art, ratings, and a clean reading preview.',
     package_name: 'book.project-hail-mary',
     platform: 'android',
     category_id: booksCategory.id,
@@ -187,6 +197,13 @@ async function seedIfNeeded() {
     size: 'Ebook',
     icon_url: '/uploads/seed/project-hail-mary.png',
   });
+
+  const oldDrone = state.apps.find((app) => app.package_name === 'com.matjari.demo.wardrone');
+  if (oldDrone) {
+    oldDrone.package_name = 'com.skyforge.wardrone';
+    oldDrone.description =
+      'A cinematic action listing with aerial missions, tactical objectives, and 3D combat visuals.';
+  }
 }
 
 function category(name, type) {
@@ -212,10 +229,20 @@ function appSeed(data) {
 }
 
 function ensureAppSeed(data) {
-  const exists = state.apps.some((app) => app.package_name === data.package_name);
-  if (!exists) {
+  const existing = state.apps.find(
+    (app) => app.package_name === data.package_name || app.name === data.name,
+  );
+  if (!existing) {
     state.apps.push(appSeed(data));
+    return;
   }
+  Object.assign(existing, {
+    ...data,
+    file_url: existing.file_url,
+    apk_file_url: existing.apk_file_url,
+    is_active: existing.is_active ?? true,
+    is_force_update: existing.is_force_update ?? false,
+  });
 }
 
 async function save() {
