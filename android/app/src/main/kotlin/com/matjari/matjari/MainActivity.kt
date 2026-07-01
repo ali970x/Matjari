@@ -15,20 +15,23 @@ import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import kotlin.math.max
 
 class MainActivity : FlutterActivity() {
     private var pendingUploadResult: MethodChannel.Result? = null
     private var pendingUploadArgs: UploadArgs? = null
+    private lateinit var channel: MethodChannel
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "matjari/native")
-            .setMethodCallHandler { call, result ->
+        channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "matjari/native")
+        channel.setMethodCallHandler { call, result ->
                 when (call.method) {
                     "downloadAndInstallApk" -> downloadAndInstallApk(
                         url = call.argument("url"),
                         fileName = call.argument("fileName"),
+                        downloadId = call.argument("downloadId"),
                         result = result,
                     )
                     "openPackage" -> result.success(openPackage(call.argument("packageName")))
@@ -43,7 +46,7 @@ class MainActivity : FlutterActivity() {
                     )
                     else -> result.notImplemented()
                 }
-            }
+        }
     }
 
     @Deprecated("Deprecated in Java")
@@ -91,6 +94,7 @@ class MainActivity : FlutterActivity() {
     private fun downloadAndInstallApk(
         url: String?,
         fileName: String?,
+        downloadId: String?,
         result: MethodChannel.Result,
     ) {
         if (url.isNullOrBlank()) {
@@ -100,9 +104,19 @@ class MainActivity : FlutterActivity() {
 
         Thread {
             try {
-                val apkFile = downloadApk(url, fileName)
+                val apkFile = downloadApk(url, fileName, downloadId)
+                val packageInfo = readApkPackageInfo(apkFile)
                 val opened = openApkInstaller(apkFile)
-                runOnUiThread { result.success(opened) }
+                runOnUiThread {
+                    result.success(
+                        mapOf(
+                            "opened" to opened,
+                            "packageName" to packageInfo?.packageName,
+                            "versionCode" to packageInfo?.versionCode,
+                            "fileSize" to apkFile.length(),
+                        ),
+                    )
+                }
             } catch (error: Exception) {
                 runOnUiThread {
                     result.error("DOWNLOAD_FAILED", error.message ?: "APK download failed", null)
@@ -220,7 +234,7 @@ class MainActivity : FlutterActivity() {
         return response
     }
 
-    private fun downloadApk(url: String, fileName: String?): File {
+    private fun downloadApk(url: String, fileName: String?, downloadId: String?): File {
         val downloadsDir = File(cacheDir, "downloads").apply {
             mkdirs()
         }
@@ -244,9 +258,26 @@ class MainActivity : FlutterActivity() {
             throw IllegalStateException(error?.ifBlank { null } ?: "Download failed with HTTP $status")
         }
 
+        val totalBytes = max(connection.contentLengthLong, 0L)
+        var downloadedBytes = 0L
+        var lastProgressSentAt = 0L
+        sendDownloadProgress(downloadId, downloadedBytes, totalBytes)
+
         connection.inputStream.use { input ->
             FileOutputStream(apkFile).use { output ->
-                input.copyTo(output)
+                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count == -1) break
+                    output.write(buffer, 0, count)
+                    downloadedBytes += count
+
+                    val now = System.currentTimeMillis()
+                    if (now - lastProgressSentAt > 180L) {
+                        lastProgressSentAt = now
+                        sendDownloadProgress(downloadId, downloadedBytes, totalBytes)
+                    }
+                }
             }
         }
 
@@ -254,7 +285,41 @@ class MainActivity : FlutterActivity() {
             throw IllegalStateException("Downloaded APK is empty")
         }
 
+        sendDownloadProgress(downloadId, apkFile.length(), max(totalBytes, apkFile.length()))
         return apkFile
+    }
+
+    @Suppress("DEPRECATION")
+    private fun readApkPackageInfo(apkFile: File): ApkPackageInfo? {
+        val info = packageManager.getPackageArchiveInfo(apkFile.absolutePath, 0) ?: return null
+        val versionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            info.longVersionCode
+        } else {
+            info.versionCode.toLong()
+        }
+        return ApkPackageInfo(info.packageName, versionCode)
+    }
+
+    private fun sendDownloadProgress(downloadId: String?, downloadedBytes: Long, totalBytes: Long) {
+        if (downloadId.isNullOrBlank()) return
+
+        val progress = if (totalBytes > 0L) {
+            (downloadedBytes.toDouble() / totalBytes.toDouble()).coerceIn(0.0, 1.0)
+        } else {
+            null
+        }
+
+        runOnUiThread {
+            channel.invokeMethod(
+                "downloadProgress",
+                mapOf(
+                    "downloadId" to downloadId,
+                    "downloadedBytes" to downloadedBytes,
+                    "totalBytes" to totalBytes,
+                    "progress" to progress,
+                ),
+            )
+        }
     }
 
     private fun openApkInstaller(apkFile: File): Boolean {
@@ -300,6 +365,11 @@ class MainActivity : FlutterActivity() {
         val endpoint: String,
         val token: String,
         val fieldName: String,
+    )
+
+    data class ApkPackageInfo(
+        val packageName: String,
+        val versionCode: Long,
     )
 
     companion object {

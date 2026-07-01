@@ -615,21 +615,28 @@ List<String> _lines(String value) {
       .toList();
 }
 
-Future<bool> _downloadAndInstallApk(String url, String fileName) async {
+Future<Map<String, dynamic>?> _downloadAndInstallApk({
+  required String url,
+  required String fileName,
+  required String downloadId,
+}) async {
   final uri = Uri.tryParse(url);
-  if (uri == null || !uri.hasScheme) return false;
-  if (!_canUseAndroidPackageBridge) return false;
+  if (uri == null || !uri.hasScheme) return null;
+  if (!_canUseAndroidPackageBridge) return null;
 
   try {
-    return await _nativeChannel.invokeMethod<bool>('downloadAndInstallApk', {
-          'url': uri.toString(),
-          'fileName': fileName,
-        }) ??
-        false;
+    final payload = await _nativeChannel.invokeMethod<Object?>(
+      'downloadAndInstallApk',
+      {'url': uri.toString(), 'fileName': fileName, 'downloadId': downloadId},
+    );
+    if (payload is Map) {
+      return Map<String, dynamic>.from(payload);
+    }
+    return null;
   } on MissingPluginException {
-    return false;
+    return null;
   } on PlatformException {
-    return false;
+    return null;
   }
 }
 
@@ -926,7 +933,7 @@ class _MatjariShellState extends State<MatjariShell>
   final MatjariApi _api = MatjariApi();
   final Map<String, int> _installedBuilds = {};
   final Map<String, double> _downloadProgress = {};
-  final Map<String, Timer> _downloadTimers = {};
+  final Map<String, String> _downloadPackageAliases = {};
   final Set<String> _locallyRemoved = {};
   final ValueNotifier<int> _statusRevision = ValueNotifier<int>(0);
   List<StoreItem> _latestItems = const [];
@@ -941,17 +948,32 @@ class _MatjariShellState extends State<MatjariShell>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _nativeChannel.setMethodCallHandler(_handleNativeMethodCall);
     _storeFuture = _api.fetchStoreData();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    for (final timer in _downloadTimers.values) {
-      timer.cancel();
-    }
+    _nativeChannel.setMethodCallHandler(null);
     _statusRevision.dispose();
     super.dispose();
+  }
+
+  Future<void> _handleNativeMethodCall(MethodCall call) async {
+    if (call.method != 'downloadProgress') return;
+    final args = call.arguments is Map
+        ? Map<Object?, Object?>.from(call.arguments as Map)
+        : <Object?, Object?>{};
+    final downloadId = _stringValue(args['downloadId']);
+    if (downloadId == null || downloadId.isEmpty) return;
+
+    final progress = _doubleValue(args['progress']);
+    if (progress == null) return;
+
+    _notifyStoreStatusChanged(() {
+      _downloadProgress[downloadId] = progress.clamp(0.0, 1.0).toDouble();
+    });
   }
 
   @override
@@ -977,6 +999,7 @@ class _MatjariShellState extends State<MatjariShell>
     _notifyStoreStatusChanged(() {
       _session = null;
       _installedBuilds.clear();
+      _downloadPackageAliases.clear();
       _locallyRemoved.clear();
     });
     _showSnack(context, 'Signed out.');
@@ -1001,6 +1024,10 @@ class _MatjariShellState extends State<MatjariShell>
 
   String _itemKey(StoreItem item) {
     return item.id.ifEmpty(item.packageName).ifEmpty(item.name);
+  }
+
+  String _installPackageName(StoreItem item) {
+    return _downloadPackageAliases[_itemKey(item)] ?? item.packageName;
   }
 
   int? _installedBuild(StoreItem item) {
@@ -1057,7 +1084,7 @@ class _MatjariShellState extends State<MatjariShell>
 
     final installedBuild = _installedBuild(item);
     if (installedBuild != null && !_needsUpdate(item)) {
-      final opened = await _openInstalledPackage(item.packageName);
+      final opened = await _openInstalledPackage(_installPackageName(item));
       final token = _session?.token;
       if (opened && token != null) {
         unawaited(
@@ -1081,65 +1108,71 @@ class _MatjariShellState extends State<MatjariShell>
   }
 
   void _startDownload(StoreItem item, {required bool updating}) {
-    final key = _itemKey(item);
-    _downloadTimers[key]?.cancel();
-    _notifyStoreStatusChanged(() {
-      _downloadProgress[key] = 0.02;
-    });
-
-    _downloadTimers[key] = Timer.periodic(const Duration(milliseconds: 140), (
-      timer,
-    ) {
-      if (!mounted) {
-        timer.cancel();
-        return;
-      }
-
-      final current = _downloadProgress[key] ?? 0;
-      final next = (current + 0.11).clamp(0.0, 1.0).toDouble();
-      if (next >= 1) {
-        final hasDirectDownload = _hasDirectDownload(item);
-        timer.cancel();
-        _downloadTimers.remove(key);
-        _notifyStoreStatusChanged(() {
-          _downloadProgress.remove(key);
-          if (!hasDirectDownload) {
-            _installedBuilds[key] = item.versionCode;
-          }
-          _locallyRemoved.remove(key);
-        });
-        final token = _session?.token;
-        if (token != null && hasDirectDownload) {
-          unawaited(_api.recordDownload(item, token).catchError((Object _) {}));
-        } else if (token != null) {
-          unawaited(_syncInstalledApp(token: token, item: item));
-        }
-        unawaited(_finishDownloadAction(item, updating: updating));
-      } else {
-        _notifyStoreStatusChanged(() {
-          _downloadProgress[key] = next;
-        });
-      }
-    });
+    unawaited(_startDownloadAsync(item, updating: updating));
   }
 
-  Future<void> _finishDownloadAction(
+  Future<void> _startDownloadAsync(
     StoreItem item, {
     required bool updating,
   }) async {
-    final url = item.fileUrl?.trim() ?? '';
-    final opened =
-        url.isNotEmpty && await _downloadAndInstallApk(url, item.name);
-    if (!mounted) return;
+    final key = _itemKey(item);
+    _notifyStoreStatusChanged(() {
+      _downloadProgress[key] = 0.0;
+    });
 
-    _showSnack(
-      context,
-      opened
-          ? 'Installer opened for ${item.name}.'
-          : url.isEmpty
-          ? 'No APK URL for ${item.name}.'
-          : 'Could not open installer for ${item.name}.',
-    );
+    try {
+      if (!_hasDirectDownload(item)) {
+        _notifyStoreStatusChanged(() {
+          _downloadProgress.remove(key);
+          _installedBuilds[key] = item.versionCode;
+          _locallyRemoved.remove(key);
+        });
+        final token = _session?.token;
+        if (token != null) {
+          unawaited(_syncInstalledApp(token: token, item: item));
+        }
+        _showSnack(
+          context,
+          '${updating ? 'Updated' : 'Installed'} ${item.name}.',
+        );
+        return;
+      }
+
+      final result = await _downloadAndInstallApk(
+        url: item.fileUrl!.trim(),
+        fileName: item.name,
+        downloadId: key,
+      );
+      final opened = result?['opened'] == true;
+      final actualPackageName = _stringValue(result?['packageName']);
+      if (actualPackageName != null && actualPackageName.isNotEmpty) {
+        _downloadPackageAliases[key] = actualPackageName;
+      }
+
+      if (!mounted) return;
+      _notifyStoreStatusChanged(() {
+        _downloadProgress.remove(key);
+        _locallyRemoved.remove(key);
+      });
+
+      final token = _session?.token;
+      if (token != null) {
+        unawaited(_api.recordDownload(item, token).catchError((Object _) {}));
+      }
+
+      _showSnack(
+        context,
+        opened
+            ? 'Installer opened for ${item.name}.'
+            : 'Downloaded ${item.name}, but installer could not open.',
+      );
+    } catch (error) {
+      if (!mounted) return;
+      _notifyStoreStatusChanged(() {
+        _downloadProgress.remove(key);
+      });
+      _showSnack(context, 'Download failed: $error');
+    }
   }
 
   bool _hasDirectDownload(StoreItem item) {
@@ -1162,7 +1195,6 @@ class _MatjariShellState extends State<MatjariShell>
 
   void _handleUninstall(StoreItem item) {
     final key = _itemKey(item);
-    _downloadTimers.remove(key)?.cancel();
     _notifyStoreStatusChanged(() {
       _downloadProgress.remove(key);
       _installedBuilds.remove(key);
@@ -1185,7 +1217,7 @@ class _MatjariShellState extends State<MatjariShell>
     }
 
     final signature = items
-        .map((item) => '${item.packageName}:${item.versionCode}')
+        .map((item) => '${_installPackageName(item)}:${item.versionCode}')
         .where((value) => !value.startsWith(':'))
         .join('|');
     if (signature.isEmpty || signature == _lastInstallScanSignature) return;
@@ -1205,12 +1237,11 @@ class _MatjariShellState extends State<MatjariShell>
 
     try {
       for (final item in items) {
-        if (item.packageName.trim().isEmpty) continue;
+        final packageName = _installPackageName(item);
+        if (packageName.trim().isEmpty) continue;
         final key = _itemKey(item);
         scannedKeys.add(key);
-        final versionCode = await _installedPackageVersionCode(
-          item.packageName,
-        );
+        final versionCode = await _installedPackageVersionCode(packageName);
         if (versionCode != null) installed[key] = versionCode;
       }
     } finally {
