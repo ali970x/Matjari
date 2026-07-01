@@ -16,6 +16,8 @@ const _ink = Color(0xFF202124);
 const _muted = Color(0xFF5F6368);
 const _line = Color(0xFFE0E3E7);
 const _surface = Color(0xFFF7F9FC);
+const _appVersionName = '1.1.0';
+const _appBuildNumber = 2;
 const _apiBaseUrl = String.fromEnvironment(
   'API_BASE_URL',
   defaultValue: 'https://matjari-api.onrender.com',
@@ -1059,6 +1061,406 @@ const _items = <StoreItem>[
   ),
 ];
 
+enum LoginMode { whatsapp, google, admin }
+
+class AuthGatePage extends StatefulWidget {
+  const AuthGatePage({
+    super.key,
+    required this.api,
+    required this.onSessionChanged,
+  });
+
+  final MatjariApi api;
+  final ValueChanged<AuthSession> onSessionChanged;
+
+  @override
+  State<AuthGatePage> createState() => _AuthGatePageState();
+}
+
+class _AuthGatePageState extends State<AuthGatePage> {
+  LoginMode _mode = LoginMode.whatsapp;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(22, 22, 22, 28),
+          children: [
+            Row(
+              children: [
+                const MatjariMark(size: 54),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: const [
+                      Text(
+                        'Matjari',
+                        style: TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      SizedBox(height: 2),
+                      Text(
+                        'Private app store for Android',
+                        style: TextStyle(color: _muted),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'App settings',
+                  onPressed: () => showAppSettingsSheet(context),
+                  icon: const Icon(Icons.more_vert),
+                ),
+              ],
+            ),
+            const SizedBox(height: 26),
+            Container(
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: const Color(0xFFE8F2FF),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFC9DCF8)),
+              ),
+              child: Row(
+                children: const [
+                  Icon(Icons.verified_user_outlined, color: _brandBlue),
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Sign in once, then browse apps, installs, updates, and your library.',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 22),
+            SegmentedButton<LoginMode>(
+              segments: const [
+                ButtonSegment(
+                  value: LoginMode.whatsapp,
+                  icon: Icon(Icons.chat_outlined),
+                  label: Text('WhatsApp'),
+                ),
+                ButtonSegment(
+                  value: LoginMode.google,
+                  icon: Icon(Icons.account_circle_outlined),
+                  label: Text('Google'),
+                ),
+                ButtonSegment(
+                  value: LoginMode.admin,
+                  icon: Icon(Icons.admin_panel_settings_outlined),
+                  label: Text('Admin'),
+                ),
+              ],
+              selected: {_mode},
+              onSelectionChanged: (value) =>
+                  setState(() => _mode = value.first),
+            ),
+            const SizedBox(height: 18),
+            if (_mode == LoginMode.admin)
+              AdminAuthPanel(
+                api: widget.api,
+                onSessionChanged: widget.onSessionChanged,
+              )
+            else
+              OtpAuthPanel(
+                api: widget.api,
+                mode: _mode,
+                onSessionChanged: widget.onSessionChanged,
+              ),
+            const SizedBox(height: 24),
+            const Text(
+              'OTP delivery will use your WhatsApp API when you provide it. For now, the screen is wired and testable with code 123456.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: _muted, fontSize: 12, height: 1.35),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class OtpAuthPanel extends StatefulWidget {
+  const OtpAuthPanel({
+    super.key,
+    required this.api,
+    required this.mode,
+    required this.onSessionChanged,
+  });
+
+  final MatjariApi api;
+  final LoginMode mode;
+  final ValueChanged<AuthSession> onSessionChanged;
+
+  @override
+  State<OtpAuthPanel> createState() => _OtpAuthPanelState();
+}
+
+class _OtpAuthPanelState extends State<OtpAuthPanel> {
+  final _nameController = TextEditingController(text: 'Matjari User');
+  final _phoneController = TextEditingController();
+  final _emailController = TextEditingController();
+  final _otpController = TextEditingController();
+  bool _otpSent = false;
+  bool _loading = false;
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _phoneController.dispose();
+    _emailController.dispose();
+    _otpController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isGoogle = widget.mode == LoginMode.google;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: _line),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x0F000000),
+            blurRadius: 18,
+            offset: Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            isGoogle ? 'Continue with Google' : 'Continue with WhatsApp OTP',
+            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            isGoogle
+                ? 'Enter your Google email, then confirm the OTP.'
+                : 'Enter your WhatsApp number, then confirm the OTP.',
+            style: const TextStyle(color: _muted),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _nameController,
+            textInputAction: TextInputAction.next,
+            decoration: const InputDecoration(labelText: 'Full name'),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: isGoogle ? _emailController : _phoneController,
+            keyboardType: isGoogle
+                ? TextInputType.emailAddress
+                : TextInputType.phone,
+            textInputAction: TextInputAction.next,
+            decoration: InputDecoration(
+              labelText: isGoogle ? 'Google email' : 'WhatsApp number',
+              prefixIcon: Icon(isGoogle ? Icons.mail_outline : Icons.phone),
+            ),
+          ),
+          if (_otpSent) ...[
+            const SizedBox(height: 12),
+            TextField(
+              controller: _otpController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'OTP code',
+                prefixIcon: Icon(Icons.password_outlined),
+              ),
+            ),
+          ],
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            onPressed: _loading ? null : (_otpSent ? _verify : _sendOtp),
+            icon: Icon(_otpSent ? Icons.login : Icons.send_outlined),
+            label: Text(
+              _loading
+                  ? 'Please wait'
+                  : _otpSent
+                  ? 'Verify and enter store'
+                  : 'Send OTP',
+            ),
+          ),
+          if (isGoogle) ...[
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: _loading
+                  ? null
+                  : () {
+                      if (_emailController.text.trim().isEmpty) {
+                        _emailController.text = 'user@gmail.com';
+                      }
+                      _sendOtp();
+                    },
+              icon: const Icon(Icons.account_circle_outlined),
+              label: const Text('Use Google account'),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  void _sendOtp() {
+    final identity = _identity.trim();
+    if (identity.isEmpty) {
+      _showSnack(
+        context,
+        widget.mode == LoginMode.google
+            ? 'Enter your Google email first.'
+            : 'Enter your WhatsApp number first.',
+      );
+      return;
+    }
+    setState(() {
+      _otpSent = true;
+      _otpController.text = '123456';
+    });
+    _showSnack(context, 'OTP sent. Use 123456 for this test build.');
+  }
+
+  Future<void> _verify() async {
+    if (_otpController.text.trim() != '123456') {
+      _showSnack(context, 'Invalid OTP.');
+      return;
+    }
+    setState(() => _loading = true);
+    try {
+      final email = _loginEmail;
+      final password = _loginPassword;
+      final name = _nameController.text.trim().ifEmpty('Matjari User');
+      AuthSession session;
+      try {
+        session = await widget.api.login(email: email, password: password);
+      } catch (_) {
+        session = await widget.api.register(
+          email: email,
+          password: password,
+          fullName: name,
+        );
+      }
+      widget.onSessionChanged(session);
+      if (mounted) _showSnack(context, 'Welcome ${session.name}.');
+    } catch (error) {
+      if (mounted) _showSnack(context, error.toString());
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  String get _identity => widget.mode == LoginMode.google
+      ? _emailController.text
+      : _phoneController.text;
+
+  String get _loginEmail {
+    if (widget.mode == LoginMode.google) {
+      return _emailController.text.trim().toLowerCase();
+    }
+    final digits = _phoneController.text.replaceAll(RegExp(r'[^0-9]'), '');
+    return '${digits.ifEmpty('user')}@whatsapp.matjari.local';
+  }
+
+  String get _loginPassword {
+    final source = widget.mode == LoginMode.google
+        ? _emailController.text.trim().toLowerCase()
+        : _phoneController.text.replaceAll(RegExp(r'[^0-9]'), '');
+    return 'otp-${source.ifEmpty('matjari')}';
+  }
+}
+
+class AdminAuthPanel extends StatefulWidget {
+  const AdminAuthPanel({
+    super.key,
+    required this.api,
+    required this.onSessionChanged,
+  });
+
+  final MatjariApi api;
+  final ValueChanged<AuthSession> onSessionChanged;
+
+  @override
+  State<AdminAuthPanel> createState() => _AdminAuthPanelState();
+}
+
+class _AdminAuthPanelState extends State<AdminAuthPanel> {
+  final _usernameController = TextEditingController(text: 'admin');
+  final _passwordController = TextEditingController(text: '123456');
+  bool _loading = false;
+
+  @override
+  void dispose() {
+    _usernameController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF7F9FC),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: _line),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text(
+            'Admin access',
+            style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
+          ),
+          const SizedBox(height: 6),
+          const Text('Default credentials: admin / 123456'),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _usernameController,
+            decoration: const InputDecoration(labelText: 'Admin username'),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _passwordController,
+            obscureText: true,
+            decoration: const InputDecoration(labelText: 'Password'),
+          ),
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            onPressed: _loading ? null : _login,
+            icon: const Icon(Icons.admin_panel_settings_outlined),
+            label: Text(_loading ? 'Please wait' : 'Enter admin dashboard'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _login() async {
+    setState(() => _loading = true);
+    try {
+      final session = await widget.api.adminLogin(
+        username: _usernameController.text.trim().ifEmpty('admin'),
+        password: _passwordController.text,
+      );
+      widget.onSessionChanged(session);
+      if (mounted) _showSnack(context, 'Admin signed in.');
+    } catch (error) {
+      if (mounted) _showSnack(context, error.toString());
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+}
+
 class MatjariShell extends StatefulWidget {
   const MatjariShell({super.key});
 
@@ -1490,6 +1892,10 @@ class _MatjariShellState extends State<MatjariShell>
 
   @override
   Widget build(BuildContext context) {
+    if (_session == null) {
+      return AuthGatePage(api: _api, onSessionChanged: _setSession);
+    }
+
     return FutureBuilder<StoreData>(
       future: _storeFuture,
       initialData: StoreData.fallback('Loading Matjari API...'),
@@ -1563,12 +1969,7 @@ class _MatjariShellState extends State<MatjariShell>
 
         return Scaffold(
           body: SafeArea(
-            child: Column(
-              children: [
-                ApiStatusBanner(store: store, onRefresh: _refreshStore),
-                Expanded(child: pages[_bottomIndex]),
-              ],
-            ),
+            child: Column(children: [Expanded(child: pages[_bottomIndex])]),
           ),
           bottomNavigationBar: NavigationBar(
             selectedIndex: _bottomIndex,
@@ -1765,6 +2166,11 @@ class StoreFeedPage extends StatelessWidget {
                   : 'Non-stop action',
               items: feedItems.reversed.take(5).toList(),
               onItemSelected: onItemSelected,
+              actionLabelFor: actionLabelFor,
+              progressFor: progressFor,
+              canUninstall: canUninstall,
+              onAction: onAction,
+              onUninstall: onUninstall,
             ),
           ),
           SliverToBoxAdapter(
@@ -1830,6 +2236,11 @@ class StoreHeader extends StatelessWidget {
             backgroundColor: Color(0xFF263238),
             child: Text('M', style: TextStyle(color: Colors.white)),
           ),
+          IconButton(
+            tooltip: 'Settings',
+            onPressed: () => showAppSettingsSheet(context),
+            icon: const Icon(Icons.more_vert),
+          ),
         ],
       ),
     );
@@ -1847,9 +2258,8 @@ class MatjariMark extends StatelessWidget {
       width: size,
       height: size,
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: _brandBlue,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: _line),
         boxShadow: const [
           BoxShadow(
             color: Color(0x14000000),
@@ -1860,50 +2270,36 @@ class MatjariMark extends StatelessWidget {
       ),
       child: Stack(
         alignment: Alignment.center,
-        children: const [
-          Positioned(
-            left: 8,
-            top: 8,
-            child: _LogoBlade(color: Color(0xFF2EA44F), turns: -0.22),
+        children: [
+          Icon(
+            Icons.shopping_bag_rounded,
+            size: size * 0.72,
+            color: Colors.white,
           ),
           Positioned(
-            right: 8,
-            top: 8,
-            child: _LogoBlade(color: Color(0xFF1A73E8), turns: 0.22),
+            bottom: size * 0.20,
+            child: Text(
+              'M',
+              style: TextStyle(
+                color: _brandBlue,
+                fontSize: size * 0.28,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
           ),
           Positioned(
-            bottom: 8,
-            left: 13,
-            child: _LogoBlade(color: Color(0xFFFFC107), turns: -0.72),
-          ),
-          Positioned(
-            bottom: 8,
-            right: 13,
-            child: _LogoBlade(color: Color(0xFFEA4335), turns: 0.72),
+            right: size * 0.12,
+            top: size * 0.12,
+            child: Container(
+              width: size * 0.22,
+              height: size * 0.22,
+              decoration: const BoxDecoration(
+                color: Color(0xFFFFC107),
+                shape: BoxShape.circle,
+              ),
+            ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _LogoBlade extends StatelessWidget {
-  const _LogoBlade({required this.color, required this.turns});
-
-  final Color color;
-  final double turns;
-
-  @override
-  Widget build(BuildContext context) {
-    return Transform.rotate(
-      angle: turns,
-      child: Container(
-        width: 20,
-        height: 8,
-        decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.circular(8),
-        ),
       ),
     );
   }
@@ -2195,7 +2591,22 @@ class SectionBlock extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SectionHeader(eyebrow: eyebrow, title: title, subtitle: subtitle),
+          SectionHeader(
+            eyebrow: eyebrow,
+            title: title,
+            subtitle: subtitle,
+            onSeeMore: () => showFullListPage(
+              context: context,
+              title: title,
+              items: items,
+              onItemSelected: onItemSelected,
+              actionLabelFor: actionLabelFor,
+              progressFor: progressFor,
+              canUninstall: canUninstall,
+              onAction: onAction,
+              onUninstall: onUninstall,
+            ),
+          ),
           const SizedBox(height: 14),
           for (final item in items)
             AppListTile(
@@ -2219,11 +2630,21 @@ class HorizontalSection extends StatelessWidget {
     required this.title,
     required this.items,
     required this.onItemSelected,
+    this.actionLabelFor,
+    this.progressFor,
+    this.canUninstall,
+    this.onAction,
+    this.onUninstall,
   });
 
   final String title;
   final List<StoreItem> items;
   final ValueChanged<StoreItem> onItemSelected;
+  final StoreItemLabelBuilder? actionLabelFor;
+  final StoreItemProgressBuilder? progressFor;
+  final StoreItemPredicate? canUninstall;
+  final ValueChanged<StoreItem>? onAction;
+  final ValueChanged<StoreItem>? onUninstall;
 
   @override
   Widget build(BuildContext context) {
@@ -2234,11 +2655,31 @@ class HorizontalSection extends StatelessWidget {
         children: [
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: SectionHeader(title: title),
+            child: SectionHeader(
+              title: title,
+              onSeeMore:
+                  actionLabelFor == null ||
+                      progressFor == null ||
+                      canUninstall == null ||
+                      onAction == null ||
+                      onUninstall == null
+                  ? null
+                  : () => showFullListPage(
+                      context: context,
+                      title: title,
+                      items: items,
+                      onItemSelected: onItemSelected,
+                      actionLabelFor: actionLabelFor!,
+                      progressFor: progressFor!,
+                      canUninstall: canUninstall!,
+                      onAction: onAction!,
+                      onUninstall: onUninstall!,
+                    ),
+            ),
           ),
           const SizedBox(height: 14),
           SizedBox(
-            height: 192,
+            height: 214,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -2262,11 +2703,13 @@ class SectionHeader extends StatelessWidget {
     required this.title,
     this.eyebrow,
     this.subtitle,
+    this.onSeeMore,
   });
 
   final String title;
   final String? eyebrow;
   final String? subtitle;
+  final VoidCallback? onSeeMore;
 
   @override
   Widget build(BuildContext context) {
@@ -2315,7 +2758,7 @@ class SectionHeader extends StatelessWidget {
         ),
         IconButton.filledTonal(
           tooltip: 'See more',
-          onPressed: () => showCategorySheet(context),
+          onPressed: onSeeMore ?? () => showCategorySheet(context),
           icon: const Icon(Icons.arrow_forward),
         ),
       ],
@@ -2525,7 +2968,11 @@ class AppCard extends StatelessWidget {
               item.name,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+              style: const TextStyle(
+                fontSize: 13,
+                height: 1.15,
+                fontWeight: FontWeight.w700,
+              ),
             ),
             const SizedBox(height: 6),
             RatingPill(rating: item.rating),
@@ -3605,6 +4052,12 @@ class _SearchPageState extends State<SearchPage> {
             for (final category
                 in widget.categories.map((item) => item.name).take(12))
               ActionChip(
+                backgroundColor: Colors.white,
+                side: const BorderSide(color: _line),
+                labelStyle: const TextStyle(
+                  color: _ink,
+                  fontWeight: FontWeight.w700,
+                ),
                 label: Text(category),
                 onPressed: () => setState(() => _query = category),
               ),
@@ -3683,6 +4136,11 @@ class BooksPage extends StatelessWidget {
           title: 'Try before you buy',
           items: visibleBooks,
           onItemSelected: onItemSelected,
+          actionLabelFor: actionLabelFor,
+          progressFor: progressFor,
+          canUninstall: canUninstall,
+          onAction: onAction,
+          onUninstall: onUninstall,
         ),
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 24, 20, 10),
@@ -3783,88 +4241,113 @@ class YouPage extends StatelessWidget {
       children: [
         Row(
           children: [
-            IconButton(
-              tooltip: 'Back',
-              onPressed: () {},
-              icon: const Icon(Icons.arrow_back),
-            ),
-            const SizedBox(width: 8),
             const Expanded(
               child: Text(
-                'Manage apps & device',
+                'You',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800),
               ),
             ),
+            IconButton(
+              tooltip: 'Refresh',
+              onPressed: onRefresh,
+              icon: const Icon(Icons.refresh),
+            ),
+            IconButton(
+              tooltip: 'Settings',
+              onPressed: () => showAppSettingsSheet(context),
+              icon: const Icon(Icons.more_vert),
+            ),
           ],
         ),
         const SizedBox(height: 18),
-        TopTabs(
-          labels: const ['Overview', 'Manage'],
-          selectedIndex: 0,
-          onChanged: (_) {},
-        ),
-        const Divider(height: 1),
-        const SizedBox(height: 26),
+        AccountSummaryCard(session: session, onLogout: onLogout),
+        const SizedBox(height: 22),
         OverviewRow(
           icon: Icons.verified_user_outlined,
           title: 'Your device is protected',
           subtitle: 'No harmful apps found',
-          action: 'Go to Play Protect',
+          action: 'Details',
           color: Color(0xFF188038),
+          onTap: () => _showSnack(context, 'Device protection looks good.'),
         ),
         OverviewRow(
-          icon: Icons.grid_view,
+          icon: Icons.system_update_alt,
           title: 'Updates available',
-          subtitle: '4 updates pending and 2 installs pending',
-          action: 'See details',
+          subtitle:
+              '${items.where((item) => item.forceUpdate || item.updateAvailable).length} apps need attention',
+          action: 'Refresh',
           color: Color(0xFFF29900),
+          onTap: onRefresh,
         ),
         OverviewRow(
           icon: Icons.storage_outlined,
-          title: '102 GB of 116 GB used',
-          subtitle: 'Storage is almost full',
-          action: 'Clean up',
+          title: 'Storage',
+          subtitle: 'Review installed apps and remove what you do not need',
+          action: 'Manage',
           color: _brandBlue,
-        ),
-        const SizedBox(height: 22),
-        AccountPanel(
-          api: api,
-          session: session,
-          onSessionChanged: onSessionChanged,
-          onLogout: onLogout,
-        ),
-        const SizedBox(height: 18),
-        FilledButton.icon(
-          onPressed: session?.role == 'admin'
-              ? () => Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => AdminDashboardPage(
-                      api: api,
-                      apps: items
-                          .where((item) => item.type != 'books')
-                          .toList(),
-                      session: session!,
-                      onChanged: onRefresh,
-                    ),
-                  ),
-                )
-              : () => Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => AdminLoginPage(
-                      api: api,
-                      onSessionChanged: onSessionChanged,
-                    ),
-                  ),
-                ),
-          icon: const Icon(Icons.admin_panel_settings_outlined),
-          label: Text(
-            session?.role == 'admin' ? 'Admin dashboard' : 'Admin login',
+          onTap: () => showFullListPage(
+            context: context,
+            title: 'Installed apps',
+            items: visibleInstalled,
+            onItemSelected: onItemSelected,
+            actionLabelFor: actionLabelFor,
+            progressFor: progressFor,
+            canUninstall: canUninstall,
+            onAction: onAction,
+            onUninstall: onUninstall,
           ),
         ),
+        OverviewRow(
+          icon: Icons.rate_review_outlined,
+          title: 'Your contributions',
+          subtitle: 'Reviews help people trust the store',
+          action: 'Write review',
+          color: Color(0xFF6C3DD9),
+          onTap: () =>
+              _showSnack(context, 'Open an app page to write a review.'),
+        ),
+        OverviewRow(
+          icon: Icons.info_outline,
+          title: 'App settings',
+          subtitle: 'Version, API, privacy, and store information',
+          action: 'Settings',
+          color: Color(0xFF455A64),
+          onTap: () => showAppSettingsSheet(context),
+        ),
+        if (session?.role == 'admin') ...[
+          FilledButton.icon(
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => AdminDashboardPage(
+                  api: api,
+                  apps: items.where((item) => item.type != 'books').toList(),
+                  session: session!,
+                  onChanged: onRefresh,
+                ),
+              ),
+            ),
+            icon: const Icon(Icons.admin_panel_settings_outlined),
+            label: const Text('Admin dashboard'),
+          ),
+          const SizedBox(height: 18),
+        ],
         const SizedBox(height: 26),
-        SectionHeader(title: 'Apps & games (${items.length})'),
+        SectionHeader(
+          title: 'Installed apps (${visibleInstalled.length})',
+          onSeeMore: () => showFullListPage(
+            context: context,
+            title: 'Installed apps',
+            items: visibleInstalled,
+            onItemSelected: onItemSelected,
+            actionLabelFor: actionLabelFor,
+            progressFor: progressFor,
+            canUninstall: canUninstall,
+            onAction: onAction,
+            onUninstall: onUninstall,
+          ),
+        ),
         const SizedBox(height: 10),
         for (final item in visibleInstalled)
           AppListTile(
@@ -4121,6 +4604,7 @@ class OverviewRow extends StatelessWidget {
     required this.subtitle,
     required this.action,
     required this.color,
+    this.onTap,
   });
 
   final IconData icon;
@@ -4128,42 +4612,104 @@ class OverviewRow extends StatelessWidget {
   final String subtitle;
   final String action;
   final Color color;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 26),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(icon, color: color, size: 30),
+              const SizedBox(width: 22),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 21,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(subtitle, style: const TextStyle(color: _muted)),
+                    const SizedBox(height: 12),
+                    Text(
+                      action,
+                      style: const TextStyle(
+                        color: _brandBlue,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class AccountSummaryCard extends StatelessWidget {
+  const AccountSummaryCard({
+    super.key,
+    required this.session,
+    required this.onLogout,
+  });
+
+  final AuthSession? session;
+  final VoidCallback onLogout;
+
+  @override
+  Widget build(BuildContext context) {
+    final current = session;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFE8F2FF),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFC9DCF8)),
+      ),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: color, size: 30),
-          const SizedBox(width: 22),
+          CircleAvatar(
+            backgroundColor: _brandBlue,
+            foregroundColor: Colors.white,
+            child: Text((current?.name ?? 'M').characters.first),
+          ),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  title,
-                  maxLines: 2,
+                  current?.name ?? 'Matjari User',
+                  maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 21,
-                    fontWeight: FontWeight.w700,
-                  ),
+                  style: const TextStyle(fontWeight: FontWeight.w900),
                 ),
-                const SizedBox(height: 6),
-                Text(subtitle, style: const TextStyle(color: _muted)),
-                const SizedBox(height: 12),
                 Text(
-                  action,
-                  style: const TextStyle(
-                    color: _brandBlue,
-                    fontWeight: FontWeight.w800,
-                  ),
+                  '${current?.role ?? 'user'} - ${current?.email ?? ''}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: _muted, fontSize: 12),
                 ),
               ],
             ),
           ),
+          OutlinedButton(onPressed: onLogout, child: const Text('Logout')),
         ],
       ),
     );
@@ -5014,6 +5560,117 @@ void showCategorySheet(
         ),
         separatorBuilder: (_, _) => const Divider(height: 1),
         itemCount: appCategories.length,
+      ),
+    ),
+  );
+}
+
+void showFullListPage({
+  required BuildContext context,
+  required String title,
+  required List<StoreItem> items,
+  required ValueChanged<StoreItem> onItemSelected,
+  required StoreItemLabelBuilder actionLabelFor,
+  required StoreItemProgressBuilder progressFor,
+  required StoreItemPredicate canUninstall,
+  required ValueChanged<StoreItem> onAction,
+  required ValueChanged<StoreItem> onUninstall,
+}) {
+  Navigator.of(context).push(
+    MaterialPageRoute(
+      builder: (_) => Scaffold(
+        appBar: AppBar(title: Text(title)),
+        body: ListView(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+          children: [
+            if (items.isEmpty)
+              const Padding(
+                padding: EdgeInsets.only(top: 40),
+                child: Text(
+                  'No items yet.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: _muted),
+                ),
+              )
+            else
+              for (final item in items)
+                AppListTile(
+                  item: item,
+                  onTap: () => onItemSelected(item),
+                  actionLabel: actionLabelFor(item),
+                  progress: progressFor(item),
+                  canUninstall: canUninstall(item),
+                  onAction: () => onAction(item),
+                  onUninstall: () => onUninstall(item),
+                ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+void showAppSettingsSheet(BuildContext context) {
+  showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    builder: (context) => SafeArea(
+      child: ListView(
+        shrinkWrap: true,
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+        children: [
+          const Row(
+            children: [
+              MatjariMark(size: 52),
+              SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Matjari',
+                      style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    Text(
+                      'Private Android app store',
+                      style: TextStyle(color: _muted),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          const DetailsRow(label: 'Version', value: _appVersionName),
+          const DetailsRow(label: 'Build', value: '$_appBuildNumber'),
+          const DetailsRow(label: 'API', value: _apiBaseUrl),
+          const DetailsRow(label: 'Install mode', value: 'Direct APK'),
+          const SizedBox(height: 12),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.privacy_tip_outlined),
+            title: const Text('Privacy'),
+            subtitle: const Text(
+              'OTP sign-in and library sync are used for your store account.',
+            ),
+            onTap: () => _showSnack(context, 'Privacy information opened.'),
+          ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.info_outline),
+            title: const Text('About Matjari'),
+            subtitle: const Text(
+              'Designed for private APK distribution without Play Store publishing.',
+            ),
+            onTap: () => _showSnack(
+              context,
+              'Matjari version $_appVersionName+$_appBuildNumber.',
+            ),
+          ),
+        ],
       ),
     ),
   );
