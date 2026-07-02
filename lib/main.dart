@@ -23,8 +23,8 @@ const _ink = Color(0xFF202124);
 const _muted = Color(0xFF5F6368);
 const _line = Color(0xFFE0E3E7);
 const _surface = Color(0xFFF7F9FC);
-const _appVersionName = '1.1.3';
-const _appBuildNumber = 5;
+const _appVersionName = '1.1.4';
+const _appBuildNumber = 6;
 const _whatsAppOtpEndpoint =
     'https://whatsapp-server1-production-72d1.up.railway.app/api/whatsapp/send-message';
 const _supportEmail = 'alimjdandash@gmail.com';
@@ -403,6 +403,20 @@ class AuthSession {
   final String phoneNumber;
   final String avatarUrl;
 
+  Map<String, dynamic> toJson() {
+    return {
+      'token': token,
+      'user': {
+        'role': role,
+        'full_name': name,
+        'email': email,
+        'username': username,
+        'phone_number': phoneNumber,
+        'avatar_url': avatarUrl,
+      },
+    };
+  }
+
   AuthSession copyWith({
     String? token,
     String? role,
@@ -617,6 +631,11 @@ class MatjariApi {
       'avatar_url': avatarUrl,
     }, token: session.token);
     return sessionFromPayload({...payload, 'token': session.token});
+  }
+
+  Future<AuthSession> me(String token) async {
+    final payload = await _get('/api/auth/me', token: token);
+    return sessionFromPayload({...payload, 'token': token});
   }
 
   Future<List<AdminUser>> fetchUsers(String token) async {
@@ -1064,6 +1083,51 @@ Future<bool> _openSupportEmail() async {
   }
 }
 
+Future<void> _saveSession(AuthSession session) async {
+  if (!_canUseAndroidPackageBridge) return;
+  try {
+    await _nativeChannel.invokeMethod<bool>('saveSession', {
+      'session': jsonEncode(session.toJson()),
+    });
+  } on MissingPluginException {
+    return;
+  } on PlatformException {
+    return;
+  }
+}
+
+Future<AuthSession?> _readSavedSession(MatjariApi api) async {
+  if (!_canUseAndroidPackageBridge) return null;
+  try {
+    final raw = await _nativeChannel.invokeMethod<String>('loadSession');
+    if (raw == null || raw.trim().isEmpty) return null;
+    final decoded = jsonDecode(raw);
+    if (decoded is! Map<String, dynamic>) return null;
+    final token = _stringValue(decoded['token']);
+    if (token == null || token.isEmpty) return null;
+    return await api.me(token);
+  } on MissingPluginException {
+    return null;
+  } on PlatformException {
+    return null;
+  } on FormatException {
+    return null;
+  } catch (_) {
+    return null;
+  }
+}
+
+Future<void> _clearSavedSession() async {
+  if (!_canUseAndroidPackageBridge) return;
+  try {
+    await _nativeChannel.invokeMethod<bool>('clearSession');
+  } on MissingPluginException {
+    return;
+  } on PlatformException {
+    return;
+  }
+}
+
 Future<bool> _openInstalledPackage(String packageName) async {
   if (!_canUseAndroidPackageBridge || packageName.trim().isEmpty) return false;
 
@@ -1489,6 +1553,7 @@ class _AuthGatePageState extends State<AuthGatePage> {
   String? _pendingOtp;
   AuthSession? _pendingSession;
   String _pendingDestination = '';
+  String _pendingOtpHint = '';
   GoogleProfile? _googleRegistrationProfile;
   bool _registerMode = false;
   bool _loading = false;
@@ -1518,17 +1583,24 @@ class _AuthGatePageState extends State<AuthGatePage> {
             const SizedBox(height: 12),
             Center(
               child: Column(
-                children: const [
-                  MatjariMark(size: 86),
-                  SizedBox(height: 16),
+                children: [
+                  const MatjariMark(size: 86),
+                  const SizedBox(height: 16),
                   Text(
                     'Matjari',
-                    style: TextStyle(fontSize: 34, fontWeight: FontWeight.w900),
+                    style: const TextStyle(
+                      fontSize: 34,
+                      fontWeight: FontWeight.w900,
+                    ),
                   ),
-                  SizedBox(height: 6),
+                  const SizedBox(height: 6),
                   Text(
-                    'Your private Android store',
-                    style: TextStyle(color: _muted, fontSize: 15),
+                    _t(
+                      context,
+                      'Your private Android store',
+                      'متجر أندرويد الخاص بك',
+                    ),
+                    style: const TextStyle(color: _muted, fontSize: 15),
                   ),
                 ],
               ),
@@ -1538,11 +1610,13 @@ class _AuthGatePageState extends State<AuthGatePage> {
               _OtpCard(
                 destination: _pendingDestination,
                 loading: _loading,
+                testingCode: _pendingOtpHint,
                 onVerify: _verifyOtp,
                 onBack: () => setState(() {
                   _pendingSession = null;
                   _pendingOtp = null;
                   _pendingDestination = '';
+                  _pendingOtpHint = '';
                 }),
               )
             else if (_registerMode)
@@ -1575,7 +1649,14 @@ class _AuthGatePageState extends State<AuthGatePage> {
     final identifier = _identifierController.text.trim();
     final password = _passwordController.text;
     if (identifier.isEmpty || password.isEmpty) {
-      _showSnack(context, 'Enter your email and password.');
+      _showSnack(
+        context,
+        _t(
+          context,
+          'Enter your email and password.',
+          'أدخل البريد أو اسم المستخدم وكلمة المرور.',
+        ),
+      );
       return;
     }
     setState(() => _loading = true);
@@ -1640,7 +1721,14 @@ class _AuthGatePageState extends State<AuthGatePage> {
           _googleRegistrationProfile = profile;
           _registerMode = true;
         });
-        _showSnack(context, 'Complete your phone number and password.');
+        _showSnack(
+          context,
+          _t(
+            context,
+            'Complete your phone number and password.',
+            'أكمل رقم الهاتف وكلمة المرور.',
+          ),
+        );
         return;
       }
       final session = widget.api.sessionFromPayload(payload);
@@ -1682,7 +1770,7 @@ class _AuthGatePageState extends State<AuthGatePage> {
     final destination = session.phoneNumber.ifEmpty(session.email);
     if (_looksLikePhone(session.phoneNumber)) {
       sent = await widget.api.sendWhatsAppOtp(
-        numberphone: session.phoneNumber,
+        numberphone: _whatsAppNumber(session.phoneNumber),
         message: message,
       );
     }
@@ -1691,12 +1779,17 @@ class _AuthGatePageState extends State<AuthGatePage> {
       _pendingSession = session;
       _pendingOtp = otp;
       _pendingDestination = destination;
+      _pendingOtpHint = sent ? '' : 'Testing OTP: $otp';
     });
     _showSnack(
       context,
       sent
-          ? 'OTP sent on WhatsApp.'
-          : 'OTP ready for testing: $otp. Add a valid WhatsApp number to send it.',
+          ? _t(context, 'OTP sent on WhatsApp.', 'تم إرسال OTP على واتساب.')
+          : _t(
+              context,
+              'OTP ready for testing: $otp. Add a valid WhatsApp number to send it.',
+              'كود الاختبار: $otp. أضف رقم واتساب صحيح ليتم الإرسال.',
+            ),
     );
   }
 
@@ -1704,11 +1797,20 @@ class _AuthGatePageState extends State<AuthGatePage> {
     final session = _pendingSession;
     if (session == null) return;
     if (value.trim() != _pendingOtp) {
-      _showSnack(context, 'Invalid OTP.');
+      _showSnack(context, _t(context, 'Invalid OTP.', 'رمز OTP غير صحيح.'));
       return;
     }
+    setState(() {
+      _pendingSession = null;
+      _pendingOtp = null;
+      _pendingDestination = '';
+      _pendingOtpHint = '';
+    });
     widget.onSessionChanged(session);
-    _showSnack(context, 'Welcome ${session.name}.');
+    _showSnack(
+      context,
+      _t(context, 'Welcome ${session.name}.', 'أهلاً ${session.name}.'),
+    );
   }
 
   void _forgotPassword() {
@@ -1726,6 +1828,10 @@ class _AuthGatePageState extends State<AuthGatePage> {
   bool _looksLikePhone(String value) {
     final digits = value.replaceAll(RegExp(r'[^0-9]'), '');
     return digits.length >= 8;
+  }
+
+  String _whatsAppNumber(String value) {
+    return value.replaceAll(RegExp(r'[^0-9]'), '');
   }
 }
 
@@ -1767,23 +1873,27 @@ class _LoginCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text(
-            'Welcome back',
-            style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900),
+          Text(
+            _t(context, 'Welcome back', 'أهلاً برجعتك'),
+            style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w900),
           ),
           const SizedBox(height: 6),
-          const Text(
-            'Login to continue to the store.',
-            style: TextStyle(color: _muted),
+          Text(
+            _t(
+              context,
+              'Login to continue to the store.',
+              'سجّل الدخول للمتابعة إلى المتجر.',
+            ),
+            style: const TextStyle(color: _muted),
           ),
           const SizedBox(height: 18),
           TextField(
             controller: identifierController,
             keyboardType: TextInputType.emailAddress,
             textInputAction: TextInputAction.next,
-            decoration: const InputDecoration(
-              labelText: 'Email or username',
-              prefixIcon: Icon(Icons.mail_outline),
+            decoration: InputDecoration(
+              labelText: _t(context, 'Email or username', 'الإيميل أو المعرف'),
+              prefixIcon: const Icon(Icons.mail_outline),
             ),
           ),
           const SizedBox(height: 12),
@@ -1791,16 +1901,20 @@ class _LoginCard extends StatelessWidget {
             controller: passwordController,
             obscureText: true,
             onSubmitted: (_) => onLogin(),
-            decoration: const InputDecoration(
-              labelText: 'Password',
-              prefixIcon: Icon(Icons.lock_outline),
+            decoration: InputDecoration(
+              labelText: _t(context, 'Password', 'كلمة المرور'),
+              prefixIcon: const Icon(Icons.lock_outline),
             ),
           ),
           const SizedBox(height: 18),
           FilledButton.icon(
             onPressed: loading ? null : onLogin,
             icon: const Icon(Icons.login),
-            label: Text(loading ? 'Please wait' : 'Login'),
+            label: Text(
+              loading
+                  ? _t(context, 'Please wait', 'انتظر قليلاً')
+                  : _t(context, 'Login', 'تسجيل الدخول'),
+            ),
           ),
           const SizedBox(height: 8),
           OutlinedButton.icon(
@@ -1829,16 +1943,18 @@ class _LoginCard extends StatelessWidget {
                 ),
               ),
             ),
-            label: const Text('Continue with Google'),
+            label: Text(
+              _t(context, 'Continue with Google', 'المتابعة عبر Google'),
+            ),
           ),
           const SizedBox(height: 8),
           OutlinedButton(
             onPressed: loading ? null : onRegister,
-            child: const Text('Register'),
+            child: Text(_t(context, 'Register', 'إنشاء حساب')),
           ),
           TextButton(
             onPressed: loading ? null : onForgotPassword,
-            child: const Text('Forget password'),
+            child: Text(_t(context, 'Forget password', 'نسيت كلمة المرور')),
           ),
         ],
       ),
@@ -2093,12 +2209,14 @@ class _OtpCard extends StatefulWidget {
   const _OtpCard({
     required this.destination,
     required this.loading,
+    required this.testingCode,
     required this.onVerify,
     required this.onBack,
   });
 
   final String destination;
   final bool loading;
+  final String testingCode;
   final ValueChanged<String> onVerify;
   final VoidCallback onBack;
 
@@ -2139,24 +2257,46 @@ class _OtpCardState extends State<_OtpCard> {
             onPressed: widget.onBack,
             icon: const Icon(Icons.arrow_back),
           ),
-          const Text(
-            'OTP verification',
-            style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900),
+          Text(
+            _t(context, 'OTP verification', 'تأكيد رمز OTP'),
+            style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w900),
           ),
           const SizedBox(height: 6),
           Text(
-            'Enter the OTP you received for ${widget.destination}.',
+            _t(
+              context,
+              'Enter the OTP you received for ${widget.destination}.',
+              'أدخل رمز OTP الذي وصلك على ${widget.destination}.',
+            ),
             style: const TextStyle(color: _muted),
           ),
+          if (widget.testingCode.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF4D7),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFE8D49B)),
+              ),
+              child: Text(
+                widget.testingCode,
+                style: const TextStyle(
+                  color: Color(0xFF6F4A00),
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 18),
           TextField(
             controller: _otpController,
             keyboardType: TextInputType.number,
             textInputAction: TextInputAction.done,
             onSubmitted: widget.onVerify,
-            decoration: const InputDecoration(
-              labelText: 'OTP code',
-              prefixIcon: Icon(Icons.password_outlined),
+            decoration: InputDecoration(
+              labelText: _t(context, 'OTP code', 'رمز OTP'),
+              prefixIcon: const Icon(Icons.password_outlined),
             ),
           ),
           const SizedBox(height: 18),
@@ -2165,7 +2305,11 @@ class _OtpCardState extends State<_OtpCard> {
                 ? null
                 : () => widget.onVerify(_otpController.text),
             icon: const Icon(Icons.verified_user_outlined),
-            label: Text(widget.loading ? 'Please wait' : 'Verify'),
+            label: Text(
+              widget.loading
+                  ? _t(context, 'Please wait', 'انتظر قليلاً')
+                  : _t(context, 'Verify', 'تأكيد'),
+            ),
           ),
         ],
       ),
@@ -2193,6 +2337,7 @@ class _MatjariShellState extends State<MatjariShell>
   bool _installScanRunning = false;
   late Future<StoreData> _storeFuture;
   AuthSession? _session;
+  bool _restoringSession = true;
   int _bottomIndex = 1;
   int _topIndex = 0;
 
@@ -2202,6 +2347,7 @@ class _MatjariShellState extends State<MatjariShell>
     WidgetsBinding.instance.addObserver(this);
     _nativeChannel.setMethodCallHandler(_handleNativeMethodCall);
     unawaited(_loadPackageAliases());
+    unawaited(_restoreSession());
     _storeFuture = _api.fetchStoreData();
   }
 
@@ -2257,6 +2403,7 @@ class _MatjariShellState extends State<MatjariShell>
 
   void _setSession(AuthSession session) {
     setState(() => _session = session);
+    unawaited(_saveSession(session));
     unawaited(_loadUserLibrary(session));
   }
 
@@ -2266,7 +2413,18 @@ class _MatjariShellState extends State<MatjariShell>
       _installedBuilds.clear();
       _locallyRemoved.clear();
     });
+    unawaited(_clearSavedSession());
     _showSnack(context, 'Signed out.');
+  }
+
+  Future<void> _restoreSession() async {
+    final session = await _readSavedSession(_api);
+    if (!mounted) return;
+    if (session != null) {
+      setState(() => _session = session);
+      unawaited(_loadUserLibrary(session));
+    }
+    setState(() => _restoringSession = false);
   }
 
   Future<void> _loadUserLibrary(AuthSession session) async {
@@ -2596,6 +2754,23 @@ class _MatjariShellState extends State<MatjariShell>
 
   @override
   Widget build(BuildContext context) {
+    if (_restoringSession) {
+      return const Scaffold(
+        body: SafeArea(
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                MatjariMark(size: 72),
+                SizedBox(height: 18),
+                CircularProgressIndicator(),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     if (_session == null) {
       return AuthGatePage(api: _api, onSessionChanged: _setSession);
     }
@@ -3827,6 +4002,9 @@ class StoreIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (_usesGeneratedLogo(item)) {
+      return GeneratedAppLogo(item: item, size: size);
+    }
     return Container(
       width: size,
       height: size,
@@ -3852,6 +4030,76 @@ class StoreIcon extends StatelessWidget {
                     Icon(item.icon, color: Colors.white, size: size * 0.48),
               ),
             ),
+    );
+  }
+}
+
+bool _usesGeneratedLogo(StoreItem item) {
+  return item.type != 'books' && (item.fileUrl?.trim().isEmpty ?? true);
+}
+
+class GeneratedAppLogo extends StatelessWidget {
+  const GeneratedAppLogo({super.key, required this.item, required this.size});
+
+  final StoreItem item;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final seed = item.name.codeUnits.fold<int>(0, (sum, code) => sum + code);
+    final colors = [
+      Color(0xFF1769D2 + (seed % 35)),
+      Color(0xFF0F766E + (seed % 27)),
+      Color(0xFF7C3AED + (seed % 21)),
+      Color(0xFFEA580C + (seed % 19)),
+      Color(0xFFDB2777 + (seed % 17)),
+    ];
+    final first = colors[seed % colors.length];
+    final second = colors[(seed + 2) % colors.length];
+    final letter = item.name.trim().isEmpty
+        ? 'M'
+        : item.name.trim().characters.first.toUpperCase();
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(size >= 96 ? 8 : 14),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [first, second],
+        ),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x18000000),
+            blurRadius: 10,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Stack(
+        children: [
+          Positioned(
+            right: -size * .12,
+            top: -size * .10,
+            child: Icon(
+              item.icon,
+              size: size * .62,
+              color: Colors.white.withValues(alpha: .22),
+            ),
+          ),
+          Center(
+            child: Text(
+              letter,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: size * .42,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -4132,7 +4380,7 @@ class AppDetailsPage extends StatelessWidget {
               ),
               const SizedBox(height: 14),
               SizedBox(
-                height: 172,
+                height: 190,
                 child: ListView.separated(
                   scrollDirection: Axis.horizontal,
                   itemBuilder: (context, index) =>
@@ -4377,8 +4625,8 @@ class ScreenshotPreview extends StatelessWidget {
         ? item.screenshotUrls[index]
         : null;
     return Container(
-      width: 118,
-      padding: const EdgeInsets.all(12),
+      width: 142,
+      padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
         color: index.isEven ? _softBlue : const Color(0xFFFFF4D7),
         borderRadius: BorderRadius.circular(8),
@@ -4391,11 +4639,16 @@ class ScreenshotPreview extends StatelessWidget {
             Expanded(
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(8),
-                child: Image.network(
-                  imageUrl,
-                  width: double.infinity,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, _, _) => StoreIcon(item: item, size: 36),
+                child: Container(
+                  color: Colors.white,
+                  alignment: Alignment.center,
+                  child: Image.network(
+                    imageUrl,
+                    width: double.infinity,
+                    height: double.infinity,
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, _, _) => StoreIcon(item: item, size: 36),
+                  ),
                 ),
               ),
             )

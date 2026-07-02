@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.StatFs
 import android.provider.OpenableColumns
+import android.provider.Settings
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -49,6 +50,15 @@ class MainActivity : FlutterActivity() {
                             subject = call.argument("subject"),
                         ),
                     )
+                    "saveSession" -> {
+                        saveSession(call.argument("session"))
+                        result.success(true)
+                    }
+                    "loadSession" -> result.success(loadSession())
+                    "clearSession" -> {
+                        clearSession()
+                        result.success(true)
+                    }
                     "rememberPackageAlias" -> {
                         rememberPackageAlias(
                             key = call.argument("key"),
@@ -233,10 +243,27 @@ class MainActivity : FlutterActivity() {
     private fun openPackageUninstaller(packageName: String?): Boolean {
         if (packageName.isNullOrBlank()) return false
 
-        val intent = Intent(Intent.ACTION_DELETE).apply {
+        val uninstallIntent = Intent(Intent.ACTION_UNINSTALL_PACKAGE).apply {
+            data = Uri.parse("package:$packageName")
+            putExtra(Intent.EXTRA_RETURN_RESULT, false)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        if (tryStartActivity(uninstallIntent)) return true
+
+        val deleteIntent = Intent(Intent.ACTION_DELETE).apply {
             data = Uri.parse("package:$packageName")
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
+        if (tryStartActivity(deleteIntent)) return true
+
+        val settingsIntent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+            data = Uri.parse("package:$packageName")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        return tryStartActivity(settingsIntent)
+    }
+
+    private fun tryStartActivity(intent: Intent): Boolean {
         return try {
             startActivity(intent)
             true
@@ -264,6 +291,26 @@ class MainActivity : FlutterActivity() {
             .apply()
     }
 
+    private fun saveSession(session: String?) {
+        if (session.isNullOrBlank()) return
+        getSharedPreferences(SESSION_PREFS, MODE_PRIVATE)
+            .edit()
+            .putString(SESSION_KEY, session)
+            .apply()
+    }
+
+    private fun loadSession(): String? {
+        return getSharedPreferences(SESSION_PREFS, MODE_PRIVATE)
+            .getString(SESSION_KEY, null)
+    }
+
+    private fun clearSession() {
+        getSharedPreferences(SESSION_PREFS, MODE_PRIVATE)
+            .edit()
+            .remove(SESSION_KEY)
+            .apply()
+    }
+
     private fun deviceStorageInfo(): Map<String, Long> {
         val stat = StatFs(filesDir.absolutePath)
         return mapOf(
@@ -279,7 +326,7 @@ class MainActivity : FlutterActivity() {
             putExtra(Intent.EXTRA_SUBJECT, subject ?: "Matjari help and feedback")
             putExtra(
                 Intent.EXTRA_TEXT,
-                "Hello Matjari support,\n\nApp version: 1.1.3+5\nIssue:\n",
+                "Hello Matjari support,\n\nApp version: 1.1.4+6\nIssue:\n",
             )
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
@@ -566,5 +613,7 @@ class MainActivity : FlutterActivity() {
         private const val PICK_UPLOAD_REQUEST = 9401
         private const val APK_MIME_TYPE = "application/vnd.android.package-archive"
         private const val ALIAS_PREFS = "matjari_package_aliases"
+        private const val SESSION_PREFS = "matjari_session"
+        private const val SESSION_KEY = "session_json"
     }
 }
