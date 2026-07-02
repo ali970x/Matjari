@@ -22,6 +22,8 @@ import kotlin.math.max
 class MainActivity : FlutterActivity() {
     private var pendingUploadResult: MethodChannel.Result? = null
     private var pendingUploadArgs: UploadArgs? = null
+    private var pendingUninstallResult: MethodChannel.Result? = null
+    private var pendingUninstallPackage: String? = null
     private lateinit var channel: MethodChannel
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -37,7 +39,10 @@ class MainActivity : FlutterActivity() {
                         result = result,
                     )
                     "openPackage" -> result.success(openPackage(call.argument("packageName")))
-                    "uninstallPackage" -> result.success(openPackageUninstaller(call.argument("packageName")))
+                    "uninstallPackage" -> openPackageUninstaller(
+                        packageName = call.argument("packageName"),
+                        result = result,
+                    )
                     "installedVersionCode" -> result.success(installedVersionCode(call.argument("packageName")))
                     "resolveInstalledPackageByName" -> result.success(
                         resolveInstalledPackageByName(call.argument("appName")),
@@ -82,6 +87,15 @@ class MainActivity : FlutterActivity() {
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == UNINSTALL_REQUEST) {
+            val result = pendingUninstallResult ?: return
+            val packageName = pendingUninstallPackage
+            pendingUninstallResult = null
+            pendingUninstallPackage = null
+            result.success(packageName != null && installedVersionCode(packageName) == null)
+            return
+        }
+
         if (requestCode != PICK_UPLOAD_REQUEST) return
 
         val result = pendingUploadResult ?: return
@@ -240,27 +254,54 @@ class MainActivity : FlutterActivity() {
             ?: ""
     }
 
-    private fun openPackageUninstaller(packageName: String?): Boolean {
-        if (packageName.isNullOrBlank()) return false
+    private fun openPackageUninstaller(packageName: String?, result: MethodChannel.Result) {
+        if (packageName.isNullOrBlank()) {
+            result.success(false)
+            return
+        }
+
+        if (pendingUninstallResult != null) {
+            result.error("UNINSTALL_BUSY", "Another uninstall flow is already open", null)
+            return
+        }
 
         val uninstallIntent = Intent(Intent.ACTION_UNINSTALL_PACKAGE).apply {
             data = Uri.parse("package:$packageName")
-            putExtra(Intent.EXTRA_RETURN_RESULT, false)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            putExtra(Intent.EXTRA_RETURN_RESULT, true)
         }
-        if (tryStartActivity(uninstallIntent)) return true
+        if (tryStartActivityForResult(uninstallIntent, packageName, result)) return
 
         val deleteIntent = Intent(Intent.ACTION_DELETE).apply {
             data = Uri.parse("package:$packageName")
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
-        if (tryStartActivity(deleteIntent)) return true
+        if (tryStartActivityForResult(deleteIntent, packageName, result)) return
 
         val settingsIntent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
             data = Uri.parse("package:$packageName")
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
-        return tryStartActivity(settingsIntent)
+        result.success(tryStartActivity(settingsIntent) && installedVersionCode(packageName) == null)
+    }
+
+    private fun tryStartActivityForResult(
+        intent: Intent,
+        packageName: String,
+        result: MethodChannel.Result,
+    ): Boolean {
+        return try {
+            pendingUninstallResult = result
+            pendingUninstallPackage = packageName
+            startActivityForResult(intent, UNINSTALL_REQUEST)
+            true
+        } catch (_: ActivityNotFoundException) {
+            pendingUninstallResult = null
+            pendingUninstallPackage = null
+            false
+        } catch (_: Exception) {
+            pendingUninstallResult = null
+            pendingUninstallPackage = null
+            false
+        }
     }
 
     private fun tryStartActivity(intent: Intent): Boolean {
@@ -611,6 +652,7 @@ class MainActivity : FlutterActivity() {
 
     companion object {
         private const val PICK_UPLOAD_REQUEST = 9401
+        private const val UNINSTALL_REQUEST = 9402
         private const val APK_MIME_TYPE = "application/vnd.android.package-archive"
         private const val ALIAS_PREFS = "matjari_package_aliases"
         private const val SESSION_PREFS = "matjari_session"

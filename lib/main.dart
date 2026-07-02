@@ -2642,11 +2642,36 @@ class _MatjariShellState extends State<MatjariShell>
   Future<void> _handleUninstallAsync(StoreItem item) async {
     final key = _itemKey(item);
     final match = await _resolveInstalledMatch(item);
-    final opened = match != null && await _uninstallPackage(match.packageName);
+    final removed = match != null && await _uninstallPackage(match.packageName);
     if (!mounted) return;
 
-    if (opened) {
-      _showSnack(context, 'Uninstaller opened for ${item.name}.');
+    if (removed) {
+      _notifyStoreStatusChanged(() {
+        _downloadProgress.remove(key);
+        _installedBuilds.remove(key);
+        _locallyRemoved.add(key);
+      });
+      final token = _session?.token;
+      if (token != null) {
+        unawaited(
+          _api
+              .uninstallUserApp(token: token, item: item)
+              .catchError((Object _) {}),
+        );
+      }
+      _lastInstallScanSignature = '';
+      unawaited(_refreshInstalledPackages(_latestItems));
+      _showSnack(context, '${item.name} was uninstalled.');
+      return;
+    }
+
+    if (match != null) {
+      _lastInstallScanSignature = '';
+      unawaited(_refreshInstalledPackages([item]));
+      _showSnack(
+        context,
+        'Android did not confirm uninstall. Confirm removal from the system screen.',
+      );
       return;
     }
 
@@ -2655,14 +2680,6 @@ class _MatjariShellState extends State<MatjariShell>
       _installedBuilds.remove(key);
       _locallyRemoved.add(key);
     });
-    final token = _session?.token;
-    if (token != null) {
-      unawaited(
-        _api
-            .uninstallUserApp(token: token, item: item)
-            .catchError((Object _) {}),
-      );
-    }
     _showSnack(context, '${item.name} removed from your Matjari library.');
   }
 
@@ -4380,13 +4397,15 @@ class AppDetailsPage extends StatelessWidget {
               ),
               const SizedBox(height: 14),
               SizedBox(
-                height: 190,
+                height: item.screenshotUrls.isEmpty ? 230 : 360,
                 child: ListView.separated(
                   scrollDirection: Axis.horizontal,
                   itemBuilder: (context, index) =>
                       ScreenshotPreview(item: item, index: index),
                   separatorBuilder: (_, _) => const SizedBox(width: 12),
-                  itemCount: 4,
+                  itemCount: item.screenshotUrls.isEmpty
+                      ? 4
+                      : item.screenshotUrls.length,
                 ),
               ),
               const SizedBox(height: 28),
@@ -4624,9 +4643,31 @@ class ScreenshotPreview extends StatelessWidget {
     final imageUrl = index < item.screenshotUrls.length
         ? item.screenshotUrls[index]
         : null;
+    if (imageUrl != null) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          width: 210,
+          height: 360,
+          color: Colors.white,
+          child: Image.network(
+            imageUrl,
+            fit: BoxFit.contain,
+            alignment: Alignment.center,
+            loadingBuilder: (context, child, loading) {
+              if (loading == null) return child;
+              return const Center(child: CircularProgressIndicator());
+            },
+            errorBuilder: (_, _, _) =>
+                Center(child: StoreIcon(item: item, size: 72)),
+          ),
+        ),
+      );
+    }
+
     return Container(
-      width: 142,
-      padding: const EdgeInsets.all(10),
+      width: 158,
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: index.isEven ? _softBlue : const Color(0xFFFFF4D7),
         borderRadius: BorderRadius.circular(8),
@@ -4635,28 +4676,10 @@ class ScreenshotPreview extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (imageUrl != null)
-            Expanded(
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: Container(
-                  color: Colors.white,
-                  alignment: Alignment.center,
-                  child: Image.network(
-                    imageUrl,
-                    width: double.infinity,
-                    height: double.infinity,
-                    fit: BoxFit.contain,
-                    errorBuilder: (_, _, _) => StoreIcon(item: item, size: 36),
-                  ),
-                ),
-              ),
-            )
-          else
-            Align(
-              alignment: Alignment.centerRight,
-              child: StoreIcon(item: item, size: 36),
-            ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: StoreIcon(item: item, size: 40),
+          ),
           const Spacer(),
           Text(
             titles[index],
