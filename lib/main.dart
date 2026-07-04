@@ -265,6 +265,41 @@ class StoreItem {
   final String updatedOn;
   final String releasedOn;
   final String offeredBy;
+
+  StoreItem copyWith({
+    String? version,
+    int? versionCode,
+    String? fileUrl,
+    bool? forceUpdate,
+    bool? updateAvailable,
+  }) {
+    return StoreItem(
+      id: id,
+      name: name,
+      category: category,
+      summary: summary,
+      rating: rating,
+      icon: icon,
+      color: color,
+      type: type,
+      installed: installed,
+      updateAvailable: updateAvailable ?? this.updateAvailable,
+      price: price,
+      size: size,
+      version: version ?? this.version,
+      versionCode: versionCode ?? this.versionCode,
+      downloads: downloads,
+      packageName: packageName,
+      platform: platform,
+      iconUrl: iconUrl,
+      fileUrl: fileUrl ?? this.fileUrl,
+      screenshotUrls: screenshotUrls,
+      forceUpdate: forceUpdate ?? this.forceUpdate,
+      updatedOn: updatedOn,
+      releasedOn: releasedOn,
+      offeredBy: offeredBy,
+    );
+  }
 }
 
 List<String> _screenshotUrls(Object? value) {
@@ -285,6 +320,73 @@ class InstalledPackageMatch {
 
   final String packageName;
   final int versionCode;
+}
+
+class DownloadedApk {
+  const DownloadedApk({
+    required this.filePath,
+    this.packageName,
+    this.versionCode,
+    this.versionName,
+    this.fileSize,
+    this.savedAt,
+  });
+
+  factory DownloadedApk.fromMap(Map<Object?, Object?> json) {
+    return DownloadedApk(
+      filePath: _stringValue(json['filePath']) ?? '',
+      packageName: _stringValue(json['packageName']),
+      versionCode: _intValue(json['versionCode']),
+      versionName: _stringValue(json['versionName']),
+      fileSize: _intValue(json['fileSize']),
+      savedAt: _stringValue(json['savedAt']),
+    );
+  }
+
+  final String filePath;
+  final String? packageName;
+  final int? versionCode;
+  final String? versionName;
+  final int? fileSize;
+  final String? savedAt;
+
+  bool get isValid => filePath.trim().isNotEmpty;
+}
+
+class AppVersionInfo {
+  const AppVersionInfo({
+    required this.versionName,
+    required this.versionCode,
+    this.fileUrl,
+    this.forceUpdate = false,
+    this.changelog = '',
+    this.createdAt = '',
+    this.current = false,
+  });
+
+  factory AppVersionInfo.fromJson(Map<String, dynamic> json) {
+    return AppVersionInfo(
+      versionName: _stringValue(json['version_name']) ?? '1.0.0',
+      versionCode: _intValue(json['version_code']) ?? 1,
+      fileUrl: _absoluteApiUrl(
+        _stringValue(json['file_url']) ?? _stringValue(json['apk_file_url']),
+      ),
+      forceUpdate: json['is_force_update'] == true,
+      changelog: _stringValue(json['changelog']) ?? '',
+      createdAt: _dateLabel(_stringValue(json['created_at'])),
+      current: json['current'] == true,
+    );
+  }
+
+  final String versionName;
+  final int versionCode;
+  final String? fileUrl;
+  final bool forceUpdate;
+  final String changelog;
+  final String createdAt;
+  final bool current;
+
+  bool get hasFile => fileUrl?.trim().isNotEmpty ?? false;
 }
 
 class AdminUploadFile {
@@ -501,7 +603,7 @@ class MatjariApi {
     for (var attempt = 0; attempt < 2; attempt++) {
       try {
         return await _fetchStoreDataOnline().timeout(
-          const Duration(seconds: 55),
+          const Duration(seconds: 30),
         );
       } catch (error) {
         lastError = error;
@@ -513,7 +615,6 @@ class MatjariApi {
 
   Future<StoreData> _fetchStoreDataOnline() async {
     try {
-      await _get('/health');
       final responses = await Future.wait([
         _get('/api/apps?platform=android'),
         _get('/api/categories'),
@@ -740,14 +841,6 @@ class MatjariApi {
     await _post('/api/library/me/${item.id}/open', {}, token: token);
   }
 
-  Future<void> uninstallUserApp({
-    required String token,
-    required StoreItem item,
-  }) async {
-    if (item.id.isEmpty) return;
-    await _delete('/api/library/me/${item.id}', token: token);
-  }
-
   Future<void> submitReview({
     required String token,
     required StoreItem item,
@@ -825,6 +918,17 @@ class MatjariApi {
       'is_force_update': forceUpdate,
       'changelog': changelog,
     }, token: token);
+  }
+
+  Future<List<AppVersionInfo>> fetchAppVersions(StoreItem app) async {
+    if (app.id.isEmpty) return const [];
+    final payload = await _get('/api/apps/${app.id}/updates');
+    final updates = payload['updates'];
+    if (updates is! List) return const [];
+    return updates
+        .whereType<Map<String, dynamic>>()
+        .map(AppVersionInfo.fromJson)
+        .toList();
   }
 
   Future<Map<String, dynamic>> fetchAnalytics(String token) async {
@@ -1022,7 +1126,7 @@ List<String> _lines(String value) {
       .toList();
 }
 
-Future<Map<String, dynamic>?> _downloadAndInstallApk({
+Future<DownloadedApk?> _downloadApk({
   required String url,
   required String fileName,
   required String downloadId,
@@ -1032,18 +1136,78 @@ Future<Map<String, dynamic>?> _downloadAndInstallApk({
   if (!_canUseAndroidPackageBridge) return null;
 
   try {
-    final payload = await _nativeChannel.invokeMethod<Object?>(
-      'downloadAndInstallApk',
-      {'url': uri.toString(), 'fileName': fileName, 'downloadId': downloadId},
-    );
+    final payload = await _nativeChannel.invokeMethod<Object?>('downloadApk', {
+      'url': uri.toString(),
+      'fileName': fileName,
+      'downloadId': downloadId,
+    });
     if (payload is Map) {
-      return Map<String, dynamic>.from(payload);
+      final apk = DownloadedApk.fromMap(Map<Object?, Object?>.from(payload));
+      return apk.isValid ? apk : null;
     }
     return null;
   } on MissingPluginException {
     return null;
   } on PlatformException {
     return null;
+  }
+}
+
+Future<Map<String, DownloadedApk>> _readDownloadedApks() async {
+  if (!_canUseAndroidPackageBridge) return const {};
+
+  try {
+    final payload = await _nativeChannel.invokeMethod<Object?>(
+      'downloadedApks',
+    );
+    if (payload is! Map) return const {};
+    final entries = <String, DownloadedApk>{};
+    for (final entry in payload.entries) {
+      final key = _stringValue(entry.key);
+      final value = entry.value;
+      if (key == null || value is! Map) continue;
+      final apk = DownloadedApk.fromMap(Map<Object?, Object?>.from(value));
+      if (apk.isValid) entries[key] = apk;
+    }
+    return entries;
+  } on MissingPluginException {
+    return const {};
+  } on PlatformException {
+    return const {};
+  }
+}
+
+Future<bool> _installDownloadedApk(DownloadedApk apk) async {
+  if (!_canUseAndroidPackageBridge || !apk.isValid) return false;
+
+  try {
+    return await _nativeChannel.invokeMethod<bool>('installDownloadedApk', {
+          'filePath': apk.filePath,
+        }) ??
+        false;
+  } on MissingPluginException {
+    return false;
+  } on PlatformException {
+    return false;
+  }
+}
+
+Future<bool> _removeDownloadedApk({
+  required String key,
+  required DownloadedApk apk,
+}) async {
+  if (!_canUseAndroidPackageBridge || !apk.isValid) return false;
+
+  try {
+    return await _nativeChannel.invokeMethod<bool>('removeDownloadedApk', {
+          'key': key,
+          'filePath': apk.filePath,
+        }) ??
+        false;
+  } on MissingPluginException {
+    return false;
+  } on PlatformException {
+    return false;
   }
 }
 
@@ -1133,21 +1297,6 @@ Future<bool> _openInstalledPackage(String packageName) async {
 
   try {
     return await _nativeChannel.invokeMethod<bool>('openPackage', {
-          'packageName': packageName,
-        }) ??
-        false;
-  } on MissingPluginException {
-    return false;
-  } on PlatformException {
-    return false;
-  }
-}
-
-Future<bool> _uninstallPackage(String packageName) async {
-  if (!_canUseAndroidPackageBridge || packageName.trim().isEmpty) return false;
-
-  try {
-    return await _nativeChannel.invokeMethod<bool>('uninstallPackage', {
           'packageName': packageName,
         }) ??
         false;
@@ -2329,6 +2478,7 @@ class _MatjariShellState extends State<MatjariShell>
   final MatjariApi _api = MatjariApi();
   final Map<String, int> _installedBuilds = {};
   final Map<String, double> _downloadProgress = {};
+  final Map<String, DownloadedApk> _downloadedApks = {};
   final Map<String, String> _downloadPackageAliases = {};
   final Set<String> _locallyRemoved = {};
   final ValueNotifier<int> _statusRevision = ValueNotifier<int>(0);
@@ -2347,6 +2497,7 @@ class _MatjariShellState extends State<MatjariShell>
     WidgetsBinding.instance.addObserver(this);
     _nativeChannel.setMethodCallHandler(_handleNativeMethodCall);
     unawaited(_loadPackageAliases());
+    unawaited(_loadDownloadedApks());
     unawaited(_restoreSession());
     _storeFuture = _api.fetchStoreData();
   }
@@ -2385,6 +2536,22 @@ class _MatjariShellState extends State<MatjariShell>
     });
     _lastInstallScanSignature = '';
     unawaited(_refreshInstalledPackages(_latestItems));
+  }
+
+  Future<void> _loadDownloadedApks() async {
+    final downloads = await _readDownloadedApks();
+    if (!mounted || downloads.isEmpty) return;
+    _notifyStoreStatusChanged(() {
+      _downloadedApks
+        ..clear()
+        ..addAll(downloads);
+      for (final entry in downloads.entries) {
+        final packageName = entry.value.packageName;
+        if (packageName != null && packageName.isNotEmpty) {
+          _downloadPackageAliases[entry.key] = packageName;
+        }
+      }
+    });
   }
 
   @override
@@ -2478,6 +2645,19 @@ class _MatjariShellState extends State<MatjariShell>
     return match;
   }
 
+  Future<InstalledPackageMatch?> _resolveInstalledMatchDirect(
+    StoreItem item,
+  ) async {
+    final packageName = _installPackageName(item).trim();
+    if (packageName.isEmpty) return null;
+    final versionCode = await _installedPackageVersionCode(packageName);
+    if (versionCode == null) return null;
+    return InstalledPackageMatch(
+      packageName: packageName,
+      versionCode: versionCode,
+    );
+  }
+
   int? _installedBuild(StoreItem item) {
     final key = _itemKey(item);
     if (_locallyRemoved.contains(key)) return null;
@@ -2492,15 +2672,20 @@ class _MatjariShellState extends State<MatjariShell>
 
   bool _needsUpdate(StoreItem item) {
     final installedBuild = _installedBuild(item);
-    return installedBuild != null && item.versionCode > installedBuild;
+    return installedBuild != null &&
+        (item.forceUpdate || item.versionCode > installedBuild);
   }
 
   double? _progressFor(StoreItem item) {
     return _downloadProgress[_itemKey(item)];
   }
 
-  bool _canUninstall(StoreItem item) {
-    return _installedBuild(item) != null;
+  DownloadedApk? _downloadedFor(StoreItem item) {
+    return _downloadedApks[_itemKey(item)];
+  }
+
+  bool _canRemoveDownload(StoreItem item) {
+    return _downloadedFor(item) != null;
   }
 
   bool _isPreviewOnly(StoreItem item) {
@@ -2515,9 +2700,14 @@ class _MatjariShellState extends State<MatjariShell>
       return '${(progress * 100).clamp(0, 100).round()}%';
     }
     final installedBuild = _installedBuild(item);
+    final downloaded = _downloadedFor(item);
     if (installedBuild != null) {
-      return _needsUpdate(item) ? 'Update' : 'Open';
+      if (_needsUpdate(item)) {
+        return downloaded == null ? 'Update' : 'Install update';
+      }
+      return 'Open';
     }
+    if (downloaded != null) return 'Install';
     if (_isPreviewOnly(item)) return 'Preview';
     if (item.type == 'books' && item.price != null) return item.price!;
     return 'Download';
@@ -2538,6 +2728,7 @@ class _MatjariShellState extends State<MatjariShell>
     if (_downloadProgress.containsKey(key)) return;
 
     final installedBuild = _installedBuild(item);
+    final downloaded = _downloadedFor(item);
     if (installedBuild != null && !_needsUpdate(item)) {
       final match = await _resolveInstalledMatch(item);
       final opened =
@@ -2557,6 +2748,17 @@ class _MatjariShellState extends State<MatjariShell>
           _locallyRemoved.add(key);
         });
         _showSnack(context, '${item.name} is not installed on this device.');
+      }
+      return;
+    }
+
+    if (downloaded != null) {
+      final opened = await _installDownloadedApk(downloaded);
+      if (!mounted) return;
+      if (opened) {
+        _showSnack(context, 'Installer opened for ${item.name}.');
+      } else {
+        _showSnack(context, 'Could not open saved APK for ${item.name}.');
       }
       return;
     }
@@ -2594,13 +2796,16 @@ class _MatjariShellState extends State<MatjariShell>
         return;
       }
 
-      final result = await _downloadAndInstallApk(
+      final downloaded = await _downloadApk(
         url: item.fileUrl!.trim(),
         fileName: item.name,
         downloadId: key,
       );
-      final opened = result?['opened'] == true;
-      final actualPackageName = _stringValue(result?['packageName']);
+      if (downloaded == null) {
+        throw Exception('Downloaded file could not be saved.');
+      }
+
+      final actualPackageName = downloaded.packageName;
       if (actualPackageName != null && actualPackageName.isNotEmpty) {
         _rememberResolvedPackage(item, actualPackageName);
       }
@@ -2608,6 +2813,7 @@ class _MatjariShellState extends State<MatjariShell>
       if (!mounted) return;
       _notifyStoreStatusChanged(() {
         _downloadProgress.remove(key);
+        _downloadedApks[key] = downloaded;
         _locallyRemoved.remove(key);
       });
 
@@ -2618,9 +2824,9 @@ class _MatjariShellState extends State<MatjariShell>
 
       _showSnack(
         context,
-        opened
-            ? 'Installer opened for ${item.name}.'
-            : 'Downloaded ${item.name}, but installer could not open.',
+        updating
+            ? 'Update saved for ${item.name}. Tap Install update when ready.'
+            : '${item.name} downloaded. Tap Install when ready.',
       );
     } catch (error) {
       if (!mounted) return;
@@ -2635,52 +2841,43 @@ class _MatjariShellState extends State<MatjariShell>
     return (item.fileUrl?.trim().isNotEmpty ?? false);
   }
 
-  void _handleUninstall(StoreItem item) {
-    unawaited(_handleUninstallAsync(item));
+  void _handleRemoveDownload(StoreItem item) {
+    unawaited(_handleRemoveDownloadAsync(item));
   }
 
-  Future<void> _handleUninstallAsync(StoreItem item) async {
+  Future<void> _handleRemoveDownloadAsync(StoreItem item) async {
     final key = _itemKey(item);
-    final match = await _resolveInstalledMatch(item);
-    final removed = match != null && await _uninstallPackage(match.packageName);
+    final downloaded = _downloadedApks[key];
+    if (downloaded == null) return;
+    final removed = await _removeDownloadedApk(key: key, apk: downloaded);
     if (!mounted) return;
-
-    if (removed) {
-      _notifyStoreStatusChanged(() {
-        _downloadProgress.remove(key);
-        _installedBuilds.remove(key);
-        _locallyRemoved.add(key);
-      });
-      final token = _session?.token;
-      if (token != null) {
-        unawaited(
-          _api
-              .uninstallUserApp(token: token, item: item)
-              .catchError((Object _) {}),
-        );
-      }
-      _lastInstallScanSignature = '';
-      unawaited(_refreshInstalledPackages(_latestItems));
-      _showSnack(context, '${item.name} was uninstalled.');
-      return;
-    }
-
-    if (match != null) {
-      _lastInstallScanSignature = '';
-      unawaited(_refreshInstalledPackages([item]));
-      _showSnack(
-        context,
-        'Android did not confirm uninstall. Confirm removal from the system screen.',
-      );
-      return;
-    }
 
     _notifyStoreStatusChanged(() {
       _downloadProgress.remove(key);
-      _installedBuilds.remove(key);
-      _locallyRemoved.add(key);
+      _downloadedApks.remove(key);
     });
-    _showSnack(context, '${item.name} removed from your Matjari library.');
+    _showSnack(
+      context,
+      removed
+          ? 'Saved APK removed. ${item.name} can be downloaded again.'
+          : '${item.name} download was removed from Matjari.',
+    );
+  }
+
+  void _handleVersionInstall(StoreItem item, AppVersionInfo version) {
+    final fileUrl = version.fileUrl?.trim();
+    if (fileUrl == null || fileUrl.isEmpty) {
+      _showSnack(context, 'This version does not have an APK file.');
+      return;
+    }
+    final versionedItem = item.copyWith(
+      version: version.versionName,
+      versionCode: version.versionCode,
+      fileUrl: fileUrl,
+      forceUpdate: version.forceUpdate,
+      updateAvailable: version.forceUpdate,
+    );
+    _startDownload(versionedItem, updating: _installedBuild(item) != null);
   }
 
   void _maybeRefreshInstalledPackages(List<StoreItem> items) {
@@ -2710,7 +2907,7 @@ class _MatjariShellState extends State<MatjariShell>
     try {
       for (final item in items) {
         final key = _itemKey(item);
-        final match = await _resolveInstalledMatch(item);
+        final match = await _resolveInstalledMatchDirect(item);
         if (match == null) {
           final packageName = _installPackageName(item);
           if (packageName.trim().isEmpty) continue;
@@ -2732,6 +2929,14 @@ class _MatjariShellState extends State<MatjariShell>
         } else {
           _installedBuilds[key] = versionCode;
           _locallyRemoved.remove(key);
+          final downloaded = _downloadedApks[key];
+          final downloadedVersion = downloaded?.versionCode;
+          if (downloaded != null &&
+              downloadedVersion != null &&
+              versionCode >= downloadedVersion) {
+            _downloadedApks.remove(key);
+            unawaited(_removeDownloadedApk(key: key, apk: downloaded));
+          }
         }
       }
     });
@@ -2761,9 +2966,10 @@ class _MatjariShellState extends State<MatjariShell>
           statusRevision: _statusRevision,
           actionLabelFor: _actionLabelFor,
           progressFor: _progressFor,
-          canUninstall: _canUninstall,
+          canRemoveDownload: _canRemoveDownload,
           onAction: _handleStoreAction,
-          onUninstall: _handleUninstall,
+          onRemoveDownload: _handleRemoveDownload,
+          onVersionInstall: _handleVersionInstall,
         ),
       ),
     );
@@ -2820,9 +3026,9 @@ class _MatjariShellState extends State<MatjariShell>
             onItemSelected: _openDetails,
             actionLabelFor: _actionLabelFor,
             progressFor: _progressFor,
-            canUninstall: _canUninstall,
+            canRemoveDownload: _canRemoveDownload,
             onAction: _handleStoreAction,
-            onUninstall: _handleUninstall,
+            onRemoveDownload: _handleRemoveDownload,
           ),
           StoreFeedPage(
             api: _api,
@@ -2839,9 +3045,9 @@ class _MatjariShellState extends State<MatjariShell>
             onItemSelected: _openDetails,
             actionLabelFor: _actionLabelFor,
             progressFor: _progressFor,
-            canUninstall: _canUninstall,
+            canRemoveDownload: _canRemoveDownload,
             onAction: _handleStoreAction,
-            onUninstall: _handleUninstall,
+            onRemoveDownload: _handleRemoveDownload,
           ),
           SearchPage(
             items: store.items,
@@ -2849,18 +3055,18 @@ class _MatjariShellState extends State<MatjariShell>
             onItemSelected: _openDetails,
             actionLabelFor: _actionLabelFor,
             progressFor: _progressFor,
-            canUninstall: _canUninstall,
+            canRemoveDownload: _canRemoveDownload,
             onAction: _handleStoreAction,
-            onUninstall: _handleUninstall,
+            onRemoveDownload: _handleRemoveDownload,
           ),
           BooksPage(
             items: store.items,
             onItemSelected: _openDetails,
             actionLabelFor: _actionLabelFor,
             progressFor: _progressFor,
-            canUninstall: _canUninstall,
+            canRemoveDownload: _canRemoveDownload,
             onAction: _handleStoreAction,
-            onUninstall: _handleUninstall,
+            onRemoveDownload: _handleRemoveDownload,
           ),
           YouPage(
             api: _api,
@@ -2874,9 +3080,9 @@ class _MatjariShellState extends State<MatjariShell>
             onRefresh: _refreshStore,
             actionLabelFor: _actionLabelFor,
             progressFor: _progressFor,
-            canUninstall: _canUninstall,
+            canRemoveDownload: _canRemoveDownload,
             onAction: _handleStoreAction,
-            onUninstall: _handleUninstall,
+            onRemoveDownload: _handleRemoveDownload,
           ),
         ];
 
@@ -2996,9 +3202,9 @@ class StoreFeedPage extends StatelessWidget {
     required this.onItemSelected,
     required this.actionLabelFor,
     required this.progressFor,
-    required this.canUninstall,
+    required this.canRemoveDownload,
     required this.onAction,
-    required this.onUninstall,
+    required this.onRemoveDownload,
   });
 
   final MatjariApi api;
@@ -3015,9 +3221,9 @@ class StoreFeedPage extends StatelessWidget {
   final ValueChanged<StoreItem> onItemSelected;
   final StoreItemLabelBuilder actionLabelFor;
   final StoreItemProgressBuilder progressFor;
-  final StoreItemPredicate canUninstall;
+  final StoreItemPredicate canRemoveDownload;
   final ValueChanged<StoreItem> onAction;
-  final ValueChanged<StoreItem> onUninstall;
+  final ValueChanged<StoreItem> onRemoveDownload;
 
   List<StoreItem> get _feedItems =>
       items.where((item) => item.type == feedType).toList();
@@ -3061,9 +3267,9 @@ class StoreFeedPage extends StatelessWidget {
               onItemSelected: onItemSelected,
               actionLabelFor: actionLabelFor,
               progressFor: progressFor,
-              canUninstall: canUninstall,
+              canRemoveDownload: canRemoveDownload,
               onAction: onAction,
-              onUninstall: onUninstall,
+              onRemoveDownload: onRemoveDownload,
             ),
           )
         else ...[
@@ -3102,9 +3308,9 @@ class StoreFeedPage extends StatelessWidget {
               onItemSelected: onItemSelected,
               actionLabelFor: actionLabelFor,
               progressFor: progressFor,
-              canUninstall: canUninstall,
+              canRemoveDownload: canRemoveDownload,
               onAction: onAction,
-              onUninstall: onUninstall,
+              onRemoveDownload: onRemoveDownload,
             ),
           ),
           SliverToBoxAdapter(
@@ -3116,9 +3322,9 @@ class StoreFeedPage extends StatelessWidget {
               onItemSelected: onItemSelected,
               actionLabelFor: actionLabelFor,
               progressFor: progressFor,
-              canUninstall: canUninstall,
+              canRemoveDownload: canRemoveDownload,
               onAction: onAction,
-              onUninstall: onUninstall,
+              onRemoveDownload: onRemoveDownload,
             ),
           ),
           SliverToBoxAdapter(
@@ -3137,9 +3343,9 @@ class StoreFeedPage extends StatelessWidget {
               onItemSelected: onItemSelected,
               actionLabelFor: actionLabelFor,
               progressFor: progressFor,
-              canUninstall: canUninstall,
+              canRemoveDownload: canRemoveDownload,
               onAction: onAction,
-              onUninstall: onUninstall,
+              onRemoveDownload: onRemoveDownload,
             ),
           ),
         ],
@@ -3519,18 +3725,18 @@ class TopChartsContent extends StatelessWidget {
     required this.onItemSelected,
     required this.actionLabelFor,
     required this.progressFor,
-    required this.canUninstall,
+    required this.canRemoveDownload,
     required this.onAction,
-    required this.onUninstall,
+    required this.onRemoveDownload,
   });
 
   final List<StoreItem> items;
   final ValueChanged<StoreItem> onItemSelected;
   final StoreItemLabelBuilder actionLabelFor;
   final StoreItemProgressBuilder progressFor;
-  final StoreItemPredicate canUninstall;
+  final StoreItemPredicate canRemoveDownload;
   final ValueChanged<StoreItem> onAction;
-  final ValueChanged<StoreItem> onUninstall;
+  final ValueChanged<StoreItem> onRemoveDownload;
 
   @override
   Widget build(BuildContext context) {
@@ -3574,9 +3780,9 @@ class TopChartsContent extends StatelessWidget {
               onTap: () => onItemSelected(entry.value),
               actionLabel: actionLabelFor(entry.value),
               progress: progressFor(entry.value),
-              canUninstall: canUninstall(entry.value),
+              canRemoveDownload: canRemoveDownload(entry.value),
               onAction: () => onAction(entry.value),
-              onUninstall: () => onUninstall(entry.value),
+              onRemoveDownload: () => onRemoveDownload(entry.value),
             ),
         ],
       ),
@@ -3592,9 +3798,9 @@ class SectionBlock extends StatelessWidget {
     required this.onItemSelected,
     required this.actionLabelFor,
     required this.progressFor,
-    required this.canUninstall,
+    required this.canRemoveDownload,
     required this.onAction,
-    required this.onUninstall,
+    required this.onRemoveDownload,
     this.eyebrow,
     this.subtitle,
   });
@@ -3606,9 +3812,9 @@ class SectionBlock extends StatelessWidget {
   final ValueChanged<StoreItem> onItemSelected;
   final StoreItemLabelBuilder actionLabelFor;
   final StoreItemProgressBuilder progressFor;
-  final StoreItemPredicate canUninstall;
+  final StoreItemPredicate canRemoveDownload;
   final ValueChanged<StoreItem> onAction;
-  final ValueChanged<StoreItem> onUninstall;
+  final ValueChanged<StoreItem> onRemoveDownload;
 
   @override
   Widget build(BuildContext context) {
@@ -3628,9 +3834,9 @@ class SectionBlock extends StatelessWidget {
               onItemSelected: onItemSelected,
               actionLabelFor: actionLabelFor,
               progressFor: progressFor,
-              canUninstall: canUninstall,
+              canRemoveDownload: canRemoveDownload,
               onAction: onAction,
-              onUninstall: onUninstall,
+              onRemoveDownload: onRemoveDownload,
             ),
           ),
           const SizedBox(height: 14),
@@ -3640,9 +3846,9 @@ class SectionBlock extends StatelessWidget {
               onTap: () => onItemSelected(item),
               actionLabel: actionLabelFor(item),
               progress: progressFor(item),
-              canUninstall: canUninstall(item),
+              canRemoveDownload: canRemoveDownload(item),
               onAction: () => onAction(item),
-              onUninstall: () => onUninstall(item),
+              onRemoveDownload: () => onRemoveDownload(item),
             ),
         ],
       ),
@@ -3658,9 +3864,9 @@ class HorizontalSection extends StatelessWidget {
     required this.onItemSelected,
     this.actionLabelFor,
     this.progressFor,
-    this.canUninstall,
+    this.canRemoveDownload,
     this.onAction,
-    this.onUninstall,
+    this.onRemoveDownload,
   });
 
   final String title;
@@ -3668,9 +3874,9 @@ class HorizontalSection extends StatelessWidget {
   final ValueChanged<StoreItem> onItemSelected;
   final StoreItemLabelBuilder? actionLabelFor;
   final StoreItemProgressBuilder? progressFor;
-  final StoreItemPredicate? canUninstall;
+  final StoreItemPredicate? canRemoveDownload;
   final ValueChanged<StoreItem>? onAction;
-  final ValueChanged<StoreItem>? onUninstall;
+  final ValueChanged<StoreItem>? onRemoveDownload;
 
   @override
   Widget build(BuildContext context) {
@@ -3686,9 +3892,9 @@ class HorizontalSection extends StatelessWidget {
               onSeeMore:
                   actionLabelFor == null ||
                       progressFor == null ||
-                      canUninstall == null ||
+                      canRemoveDownload == null ||
                       onAction == null ||
-                      onUninstall == null
+                      onRemoveDownload == null
                   ? null
                   : () => showFullListPage(
                       context: context,
@@ -3697,9 +3903,9 @@ class HorizontalSection extends StatelessWidget {
                       onItemSelected: onItemSelected,
                       actionLabelFor: actionLabelFor!,
                       progressFor: progressFor!,
-                      canUninstall: canUninstall!,
+                      canRemoveDownload: canRemoveDownload!,
                       onAction: onAction!,
-                      onUninstall: onUninstall!,
+                      onRemoveDownload: onRemoveDownload!,
                     ),
             ),
           ),
@@ -3801,18 +4007,18 @@ class AppListTile extends StatelessWidget {
     required this.onTap,
     this.actionLabel,
     this.progress,
-    this.canUninstall = false,
+    this.canRemoveDownload = false,
     this.onAction,
-    this.onUninstall,
+    this.onRemoveDownload,
   });
 
   final StoreItem item;
   final VoidCallback onTap;
   final String? actionLabel;
   final double? progress;
-  final bool canUninstall;
+  final bool canRemoveDownload;
   final VoidCallback? onAction;
-  final VoidCallback? onUninstall;
+  final VoidCallback? onRemoveDownload;
 
   @override
   Widget build(BuildContext context) {
@@ -3854,7 +4060,11 @@ class AppListTile extends StatelessWidget {
                     children: [
                       RatingPill(rating: item.rating),
                       if (item.installed) const StatusPill(text: 'Installed'),
-                      if (item.updateAvailable)
+                      if (label == 'Install' || label == 'Install update')
+                        const StatusPill(text: 'Downloaded'),
+                      if (item.updateAvailable ||
+                          label == 'Update' ||
+                          label == 'Install update')
                         const StatusPill(text: 'Update'),
                       if (item.price != null) StatusPill(text: item.price!),
                     ],
@@ -3866,12 +4076,13 @@ class AppListTile extends StatelessWidget {
             StoreActionControls(
               label: label,
               progress: progress,
-              canUninstall: canUninstall,
+              canRemoveDownload: canRemoveDownload,
               onAction:
                   onAction ?? () => _showSnack(context, '$label selected.'),
-              onUninstall:
-                  onUninstall ??
-                  () => _showSnack(context, 'Uninstall ${item.name}.'),
+              onRemoveDownload:
+                  onRemoveDownload ??
+                  () =>
+                      _showSnack(context, 'Remove saved APK for ${item.name}.'),
             ),
           ],
         ),
@@ -3888,9 +4099,9 @@ class RankedAppTile extends StatelessWidget {
     required this.onTap,
     this.actionLabel,
     this.progress,
-    this.canUninstall = false,
+    this.canRemoveDownload = false,
     this.onAction,
-    this.onUninstall,
+    this.onRemoveDownload,
   });
 
   final int rank;
@@ -3898,9 +4109,9 @@ class RankedAppTile extends StatelessWidget {
   final VoidCallback onTap;
   final String? actionLabel;
   final double? progress;
-  final bool canUninstall;
+  final bool canRemoveDownload;
   final VoidCallback? onAction;
-  final VoidCallback? onUninstall;
+  final VoidCallback? onRemoveDownload;
 
   @override
   Widget build(BuildContext context) {
@@ -3950,6 +4161,10 @@ class RankedAppTile extends StatelessWidget {
                     children: [
                       RatingPill(rating: item.rating),
                       if (item.installed) const StatusPill(text: 'Installed'),
+                      if (label == 'Install' || label == 'Install update')
+                        const StatusPill(text: 'Downloaded'),
+                      if (label == 'Update' || label == 'Install update')
+                        const StatusPill(text: 'Update'),
                     ],
                   ),
                 ],
@@ -3960,12 +4175,13 @@ class RankedAppTile extends StatelessWidget {
               compact: true,
               label: label,
               progress: progress,
-              canUninstall: canUninstall,
+              canRemoveDownload: canRemoveDownload,
               onAction:
                   onAction ?? () => _showSnack(context, '$label selected.'),
-              onUninstall:
-                  onUninstall ??
-                  () => _showSnack(context, 'Uninstall ${item.name}.'),
+              onRemoveDownload:
+                  onRemoveDownload ??
+                  () =>
+                      _showSnack(context, 'Remove saved APK for ${item.name}.'),
             ),
           ],
         ),
@@ -4173,16 +4389,16 @@ class StoreActionControls extends StatelessWidget {
     required this.label,
     required this.onAction,
     this.progress,
-    this.canUninstall = false,
-    this.onUninstall,
+    this.canRemoveDownload = false,
+    this.onRemoveDownload,
     this.compact = false,
   });
 
   final String label;
   final double? progress;
-  final bool canUninstall;
+  final bool canRemoveDownload;
   final VoidCallback onAction;
-  final VoidCallback? onUninstall;
+  final VoidCallback? onRemoveDownload;
   final bool compact;
 
   @override
@@ -4230,11 +4446,11 @@ class StoreActionControls extends StatelessWidget {
                 child: FittedBox(child: Text(label)),
               ),
             ),
-          if (canUninstall) ...[
+          if (canRemoveDownload) ...[
             const SizedBox(height: 2),
             IconButton(
-              tooltip: 'Remove from library',
-              onPressed: onUninstall,
+              tooltip: 'Remove saved APK',
+              onPressed: onRemoveDownload,
               icon: const Icon(Icons.delete_outline, size: 19),
               visualDensity: VisualDensity.compact,
             ),
@@ -4254,9 +4470,10 @@ class AppDetailsPage extends StatelessWidget {
     required this.statusRevision,
     required this.actionLabelFor,
     required this.progressFor,
-    required this.canUninstall,
+    required this.canRemoveDownload,
     required this.onAction,
-    required this.onUninstall,
+    required this.onRemoveDownload,
+    required this.onVersionInstall,
   });
 
   final StoreItem item;
@@ -4265,9 +4482,10 @@ class AppDetailsPage extends StatelessWidget {
   final ValueListenable<int> statusRevision;
   final StoreItemLabelBuilder actionLabelFor;
   final StoreItemProgressBuilder progressFor;
-  final StoreItemPredicate canUninstall;
+  final StoreItemPredicate canRemoveDownload;
   final ValueChanged<StoreItem> onAction;
-  final ValueChanged<StoreItem> onUninstall;
+  final ValueChanged<StoreItem> onRemoveDownload;
+  final void Function(StoreItem item, AppVersionInfo version) onVersionInstall;
 
   @override
   Widget build(BuildContext context) {
@@ -4293,7 +4511,7 @@ class AppDetailsPage extends StatelessWidget {
           final currentProgress = progressFor(item);
           final progressValue = currentProgress?.clamp(0.0, 1.0).toDouble();
           final actionText = actionLabelFor(item);
-          final uninstallReady = canUninstall(item);
+          final removeReady = canRemoveDownload(item);
 
           return ListView(
             padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
@@ -4366,14 +4584,14 @@ class AppDetailsPage extends StatelessWidget {
                   ),
                 ),
               ],
-              if (uninstallReady) ...[
+              if (removeReady) ...[
                 const SizedBox(height: 12),
                 Align(
                   alignment: Alignment.centerLeft,
                   child: OutlinedButton.icon(
-                    onPressed: () => onUninstall(item),
+                    onPressed: () => onRemoveDownload(item),
                     icon: const Icon(Icons.delete_outline, size: 18),
-                    label: const Text('Uninstall'),
+                    label: const Text('Remove saved APK'),
                   ),
                 ),
               ],
@@ -4426,9 +4644,24 @@ class AppDetailsPage extends StatelessWidget {
                   StatusPill(text: item.category),
                   const StatusPill(text: 'Phone'),
                   const StatusPill(text: 'Android'),
+                  if (item.forceUpdate) const StatusPill(text: 'Force update'),
                   if (item.updateAvailable)
                     const StatusPill(text: 'Update available'),
                 ],
+              ),
+              const SizedBox(height: 18),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton.icon(
+                  onPressed: () => showVersionsSheet(
+                    context: context,
+                    api: api,
+                    item: item,
+                    onInstall: onVersionInstall,
+                  ),
+                  icon: const Icon(Icons.history),
+                  label: const Text('Versions'),
+                ),
               ),
               const SizedBox(height: 28),
               AppInfoPanel(item: item),
@@ -4451,6 +4684,120 @@ class AppDetailsPage extends StatelessWidget {
       ),
     );
   }
+}
+
+void showVersionsSheet({
+  required BuildContext context,
+  required MatjariApi api,
+  required StoreItem item,
+  required void Function(StoreItem item, AppVersionInfo version) onInstall,
+}) {
+  showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    builder: (sheetContext) => Padding(
+      padding: EdgeInsets.fromLTRB(
+        20,
+        20,
+        20,
+        20 + MediaQuery.of(sheetContext).viewInsets.bottom,
+      ),
+      child: FutureBuilder<List<AppVersionInfo>>(
+        future: api.fetchAppVersions(item),
+        builder: (context, snapshot) {
+          final versions = snapshot.data ?? const <AppVersionInfo>[];
+          return ListView(
+            shrinkWrap: true,
+            children: [
+              const Text(
+                'Versions',
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
+              ),
+              const SizedBox(height: 6),
+              Text(item.name, style: const TextStyle(color: _muted)),
+              const SizedBox(height: 16),
+              if (snapshot.connectionState != ConnectionState.done)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 24),
+                  child: Center(child: CircularProgressIndicator()),
+                )
+              else if (versions.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 18),
+                  child: Text(
+                    'No saved versions yet.',
+                    style: TextStyle(color: _muted),
+                  ),
+                )
+              else
+                for (final version in versions)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: _line),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.history, color: _brandBlue),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '${version.versionName} (${version.versionCode})',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Wrap(
+                                spacing: 6,
+                                runSpacing: 6,
+                                children: [
+                                  if (version.current)
+                                    const StatusPill(text: 'Current'),
+                                  if (version.forceUpdate)
+                                    const StatusPill(text: 'Force'),
+                                  if (version.createdAt.isNotEmpty)
+                                    StatusPill(text: version.createdAt),
+                                ],
+                              ),
+                              if (version.changelog.isNotEmpty) ...[
+                                const SizedBox(height: 6),
+                                Text(
+                                  version.changelog,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(color: _muted),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        FilledButton.tonal(
+                          onPressed: version.hasFile
+                              ? () {
+                                  Navigator.pop(sheetContext);
+                                  onInstall(item, version);
+                                }
+                              : null,
+                          child: const Text('Install'),
+                        ),
+                      ],
+                    ),
+                  ),
+            ],
+          );
+        },
+      ),
+    ),
+  );
 }
 
 class InfoMetric extends StatelessWidget {
@@ -5101,9 +5448,9 @@ class SearchPage extends StatefulWidget {
     required this.onItemSelected,
     required this.actionLabelFor,
     required this.progressFor,
-    required this.canUninstall,
+    required this.canRemoveDownload,
     required this.onAction,
-    required this.onUninstall,
+    required this.onRemoveDownload,
   });
 
   final List<StoreItem> items;
@@ -5111,9 +5458,9 @@ class SearchPage extends StatefulWidget {
   final ValueChanged<StoreItem> onItemSelected;
   final StoreItemLabelBuilder actionLabelFor;
   final StoreItemProgressBuilder progressFor;
-  final StoreItemPredicate canUninstall;
+  final StoreItemPredicate canRemoveDownload;
   final ValueChanged<StoreItem> onAction;
-  final ValueChanged<StoreItem> onUninstall;
+  final ValueChanged<StoreItem> onRemoveDownload;
 
   @override
   State<SearchPage> createState() => _SearchPageState();
@@ -5188,9 +5535,9 @@ class _SearchPageState extends State<SearchPage> {
             onTap: () => widget.onItemSelected(item),
             actionLabel: widget.actionLabelFor(item),
             progress: widget.progressFor(item),
-            canUninstall: widget.canUninstall(item),
+            canRemoveDownload: widget.canRemoveDownload(item),
             onAction: () => widget.onAction(item),
-            onUninstall: () => widget.onUninstall(item),
+            onRemoveDownload: () => widget.onRemoveDownload(item),
           ),
       ],
     );
@@ -5204,18 +5551,18 @@ class BooksPage extends StatelessWidget {
     required this.onItemSelected,
     required this.actionLabelFor,
     required this.progressFor,
-    required this.canUninstall,
+    required this.canRemoveDownload,
     required this.onAction,
-    required this.onUninstall,
+    required this.onRemoveDownload,
   });
 
   final List<StoreItem> items;
   final ValueChanged<StoreItem> onItemSelected;
   final StoreItemLabelBuilder actionLabelFor;
   final StoreItemProgressBuilder progressFor;
-  final StoreItemPredicate canUninstall;
+  final StoreItemPredicate canRemoveDownload;
   final ValueChanged<StoreItem> onAction;
-  final ValueChanged<StoreItem> onUninstall;
+  final ValueChanged<StoreItem> onRemoveDownload;
 
   @override
   Widget build(BuildContext context) {
@@ -5254,9 +5601,9 @@ class BooksPage extends StatelessWidget {
           onItemSelected: onItemSelected,
           actionLabelFor: actionLabelFor,
           progressFor: progressFor,
-          canUninstall: canUninstall,
+          canRemoveDownload: canRemoveDownload,
           onAction: onAction,
-          onUninstall: onUninstall,
+          onRemoveDownload: onRemoveDownload,
         ),
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 24, 20, 10),
@@ -5307,9 +5654,9 @@ class BooksPage extends StatelessWidget {
           onItemSelected: onItemSelected,
           actionLabelFor: actionLabelFor,
           progressFor: progressFor,
-          canUninstall: canUninstall,
+          canRemoveDownload: canRemoveDownload,
           onAction: onAction,
-          onUninstall: onUninstall,
+          onRemoveDownload: onRemoveDownload,
         ),
       ],
     );
@@ -5330,9 +5677,9 @@ class YouPage extends StatefulWidget {
     required this.onRefresh,
     required this.actionLabelFor,
     required this.progressFor,
-    required this.canUninstall,
+    required this.canRemoveDownload,
     required this.onAction,
-    required this.onUninstall,
+    required this.onRemoveDownload,
   });
 
   final MatjariApi api;
@@ -5346,9 +5693,9 @@ class YouPage extends StatefulWidget {
   final VoidCallback onRefresh;
   final StoreItemLabelBuilder actionLabelFor;
   final StoreItemProgressBuilder progressFor;
-  final StoreItemPredicate canUninstall;
+  final StoreItemPredicate canRemoveDownload;
   final ValueChanged<StoreItem> onAction;
-  final ValueChanged<StoreItem> onUninstall;
+  final ValueChanged<StoreItem> onRemoveDownload;
 
   @override
   State<YouPage> createState() => _YouPageState();
@@ -5372,7 +5719,10 @@ class _YouPageState extends State<YouPage> {
 
   @override
   Widget build(BuildContext context) {
-    final installed = widget.items.where(widget.canUninstall).toList();
+    final installed = widget.items.where((item) {
+      final label = widget.actionLabelFor(item);
+      return label == 'Open' || label == 'Update' || label == 'Install update';
+    }).toList();
     final visibleInstalled = installed.isEmpty
         ? widget.items.take(4).toList()
         : installed;
@@ -5488,9 +5838,9 @@ class _YouPageState extends State<YouPage> {
               onItemSelected: widget.onItemSelected,
               actionLabelFor: widget.actionLabelFor,
               progressFor: widget.progressFor,
-              canUninstall: widget.canUninstall,
+              canRemoveDownload: widget.canRemoveDownload,
               onAction: widget.onAction,
-              onUninstall: widget.onUninstall,
+              onRemoveDownload: widget.onRemoveDownload,
             ),
           ),
           const SizedBox(height: 10),
@@ -5500,9 +5850,9 @@ class _YouPageState extends State<YouPage> {
               onTap: () => widget.onItemSelected(item),
               actionLabel: widget.actionLabelFor(item),
               progress: widget.progressFor(item),
-              canUninstall: widget.canUninstall(item),
+              canRemoveDownload: widget.canRemoveDownload(item),
               onAction: () => widget.onAction(item),
-              onUninstall: () => widget.onUninstall(item),
+              onRemoveDownload: () => widget.onRemoveDownload(item),
             ),
         ],
       ],
@@ -5555,9 +5905,9 @@ class _YouPageState extends State<YouPage> {
                     onItemSelected: widget.onItemSelected,
                     actionLabelFor: widget.actionLabelFor,
                     progressFor: widget.progressFor,
-                    canUninstall: widget.canUninstall,
+                    canRemoveDownload: widget.canRemoveDownload,
                     onAction: widget.onAction,
-                    onUninstall: widget.onUninstall,
+                    onRemoveDownload: widget.onRemoveDownload,
                   ),
             child: Text(_t(context, 'Details', 'تفاصيل')),
           ),
@@ -5610,9 +5960,9 @@ class _YouPageState extends State<YouPage> {
                       onItemSelected: widget.onItemSelected,
                       actionLabelFor: widget.actionLabelFor,
                       progressFor: widget.progressFor,
-                      canUninstall: widget.canUninstall,
+                      canRemoveDownload: widget.canRemoveDownload,
                       onAction: widget.onAction,
-                      onUninstall: widget.onUninstall,
+                      onRemoveDownload: widget.onRemoveDownload,
                     ),
                     child: Text(_t(context, 'Manage', 'إدارة')),
                   ),
@@ -7152,7 +7502,9 @@ void _showEditSheet(
                       }
                     },
               icon: const Icon(Icons.image_outlined),
-              label: Text(uploadingIcon ? 'Uploading icon' : 'Upload icon'),
+              label: Text(
+                uploadingIcon ? 'Uploading logo' : 'Replace app logo',
+              ),
             ),
             const SizedBox(height: 12),
             TextField(
@@ -7254,8 +7606,63 @@ void _showEditSheet(
               label: Text(
                 uploadingScreenshots
                     ? 'Uploading screenshots'
-                    : 'Upload screenshots',
+                    : 'Add screenshots',
               ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: saving || uploadingScreenshots
+                        ? null
+                        : () async {
+                            setSheetState(() => uploadingScreenshots = true);
+                            try {
+                              final uploads = await _pickAndUploadAdminFile(
+                                endpoint: '/api/uploads/screenshots',
+                                token: session.token,
+                                fieldName: 'screenshots',
+                                mimeType: 'image/*',
+                                allowMultiple: true,
+                              );
+                              if (uploads.isNotEmpty) {
+                                screenshotsController.text = uploads
+                                    .map((upload) => upload.url)
+                                    .join('\n');
+                                if (context.mounted) {
+                                  _showSnack(context, 'Screenshots replaced.');
+                                }
+                              }
+                            } catch (error) {
+                              if (context.mounted) {
+                                _showSnack(context, error.toString());
+                              }
+                            } finally {
+                              if (sheetContext.mounted) {
+                                setSheetState(
+                                  () => uploadingScreenshots = false,
+                                );
+                              }
+                            }
+                          },
+                    icon: const Icon(Icons.swap_horiz),
+                    label: const Text('Replace all'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: saving || uploadingScreenshots
+                        ? null
+                        : () => setSheetState(
+                            () => screenshotsController.clear(),
+                          ),
+                    icon: const Icon(Icons.clear),
+                    label: const Text('Clear'),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 8),
             SwitchListTile(
@@ -7379,9 +7786,9 @@ void showFullListPage({
   required ValueChanged<StoreItem> onItemSelected,
   required StoreItemLabelBuilder actionLabelFor,
   required StoreItemProgressBuilder progressFor,
-  required StoreItemPredicate canUninstall,
+  required StoreItemPredicate canRemoveDownload,
   required ValueChanged<StoreItem> onAction,
-  required ValueChanged<StoreItem> onUninstall,
+  required ValueChanged<StoreItem> onRemoveDownload,
 }) {
   Navigator.of(context).push(
     MaterialPageRoute(
@@ -7406,9 +7813,9 @@ void showFullListPage({
                   onTap: () => onItemSelected(item),
                   actionLabel: actionLabelFor(item),
                   progress: progressFor(item),
-                  canUninstall: canUninstall(item),
+                  canRemoveDownload: canRemoveDownload(item),
                   onAction: () => onAction(item),
-                  onUninstall: () => onUninstall(item),
+                  onRemoveDownload: () => onRemoveDownload(item),
                 ),
           ],
         ),

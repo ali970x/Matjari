@@ -70,6 +70,8 @@ const createUpdate = asyncHandler(async (req, res) => {
     throw httpError(400, 'version_name and version_code are required');
   }
 
+  await ensureVersionSnapshot(app);
+
   const update = await store.create('app_updates', {
     app_id: app.id,
     version_name: req.body.version_name,
@@ -88,6 +90,13 @@ const createUpdate = asyncHandler(async (req, res) => {
   });
 
   res.status(201).json({ update });
+});
+
+const listUpdates = asyncHandler(async (req, res) => {
+  const app = store.findById('apps', req.params.id);
+  if (!app) throw httpError(404, 'App not found');
+
+  res.json({ updates: versionHistory(app) });
 });
 
 const getAnalytics = asyncHandler(async (_req, res) => {
@@ -168,6 +177,60 @@ function updatePayload(app, currentBuild) {
       file_url: app.file_url || app.apk_file_url,
     },
   };
+}
+
+async function ensureVersionSnapshot(app) {
+  const fileUrl = app.file_url || app.apk_file_url || null;
+  if (!fileUrl) return;
+
+  const exists = store
+    .all('app_updates')
+    .some(
+      (item) =>
+        item.app_id === app.id && Number(item.version_code) === Number(app.version_code),
+    );
+  if (exists) return;
+
+  await store.create('app_updates', {
+    app_id: app.id,
+    version_name: app.version_name,
+    version_code: app.version_code,
+    file_url: fileUrl,
+    is_force_update: false,
+    changelog: 'Previous release',
+  });
+}
+
+function versionHistory(app) {
+  const byVersion = new Map();
+  const currentFileUrl = app.file_url || app.apk_file_url || null;
+
+  if (currentFileUrl) {
+    byVersion.set(Number(app.version_code), {
+      app_id: app.id,
+      version_name: app.version_name,
+      version_code: app.version_code,
+      file_url: currentFileUrl,
+      is_force_update: Boolean(app.is_force_update),
+      changelog: 'Current release',
+      current: true,
+      created_at: app.updated_at || app.created_at,
+    });
+  }
+
+  for (const update of store.all('app_updates').filter((item) => item.app_id === app.id)) {
+    const versionCode = Number(update.version_code);
+    const existing = byVersion.get(versionCode);
+    if (existing?.current) continue;
+    byVersion.set(versionCode, {
+      ...update,
+      current: false,
+    });
+  }
+
+  return [...byVersion.values()].sort(
+    (a, b) => Number(b.version_code) - Number(a.version_code),
+  );
 }
 
 function normalizeAppPayload(body, partial = false) {
@@ -270,6 +333,7 @@ module.exports = {
   updateApp,
   deleteApp,
   createUpdate,
+  listUpdates,
   checkUpdate,
   checkPackageUpdate,
   getAnalytics,

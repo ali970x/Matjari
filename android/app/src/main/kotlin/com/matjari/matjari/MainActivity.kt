@@ -7,7 +7,6 @@ import android.net.Uri
 import android.os.Build
 import android.os.StatFs
 import android.provider.OpenableColumns
-import android.provider.Settings
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -17,13 +16,12 @@ import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import org.json.JSONObject
 import kotlin.math.max
 
 class MainActivity : FlutterActivity() {
     private var pendingUploadResult: MethodChannel.Result? = null
     private var pendingUploadArgs: UploadArgs? = null
-    private var pendingUninstallResult: MethodChannel.Result? = null
-    private var pendingUninstallPackage: String? = null
     private lateinit var channel: MethodChannel
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -32,17 +30,23 @@ class MainActivity : FlutterActivity() {
         channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "matjari/native")
         channel.setMethodCallHandler { call, result ->
                 when (call.method) {
-                    "downloadAndInstallApk" -> downloadAndInstallApk(
+                    "downloadApk" -> downloadApkOnly(
                         url = call.argument("url"),
                         fileName = call.argument("fileName"),
                         downloadId = call.argument("downloadId"),
                         result = result,
                     )
-                    "openPackage" -> result.success(openPackage(call.argument("packageName")))
-                    "uninstallPackage" -> openPackageUninstaller(
-                        packageName = call.argument("packageName"),
-                        result = result,
+                    "downloadedApks" -> result.success(downloadedApks())
+                    "installDownloadedApk" -> result.success(
+                        installDownloadedApk(call.argument("filePath")),
                     )
+                    "removeDownloadedApk" -> result.success(
+                        removeDownloadedApk(
+                            key = call.argument("key"),
+                            filePath = call.argument("filePath"),
+                        ),
+                    )
+                    "openPackage" -> result.success(openPackage(call.argument("packageName")))
                     "installedVersionCode" -> result.success(installedVersionCode(call.argument("packageName")))
                     "resolveInstalledPackageByName" -> result.success(
                         resolveInstalledPackageByName(call.argument("appName")),
@@ -87,15 +91,6 @@ class MainActivity : FlutterActivity() {
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == UNINSTALL_REQUEST) {
-            val result = pendingUninstallResult ?: return
-            val packageName = pendingUninstallPackage
-            pendingUninstallResult = null
-            pendingUninstallPackage = null
-            result.success(packageName != null && installedVersionCode(packageName) == null)
-            return
-        }
-
         if (requestCode != PICK_UPLOAD_REQUEST) return
 
         val result = pendingUploadResult ?: return
@@ -143,7 +138,7 @@ class MainActivity : FlutterActivity() {
         }.start()
     }
 
-    private fun downloadAndInstallApk(
+    private fun downloadApkOnly(
         url: String?,
         fileName: String?,
         downloadId: String?,
@@ -156,18 +151,14 @@ class MainActivity : FlutterActivity() {
 
         Thread {
             try {
+                if (!downloadId.isNullOrBlank()) removeDownloadedApk(key = downloadId, filePath = null)
                 val apkFile = downloadApk(url, fileName, downloadId)
                 val packageInfo = readApkPackageInfo(apkFile)
-                val opened = openApkInstaller(apkFile)
+                if (!downloadId.isNullOrBlank()) {
+                    rememberDownloadedApk(downloadId, apkFile, packageInfo)
+                }
                 runOnUiThread {
-                    result.success(
-                        mapOf(
-                            "opened" to opened,
-                            "packageName" to packageInfo?.packageName,
-                            "versionCode" to packageInfo?.versionCode,
-                            "fileSize" to apkFile.length(),
-                        ),
-                    )
+                    result.success(downloadedApkPayload(apkFile, packageInfo))
                 }
             } catch (error: Exception) {
                 runOnUiThread {
@@ -175,6 +166,70 @@ class MainActivity : FlutterActivity() {
                 }
             }
         }.start()
+    }
+
+    private fun downloadedApks(): Map<String, Map<String, Any?>> {
+        val prefs = getSharedPreferences(DOWNLOAD_PREFS, MODE_PRIVATE)
+        val result = mutableMapOf<String, Map<String, Any?>>()
+        val staleKeys = mutableListOf<String>()
+
+        for ((key, value) in prefs.all) {
+            val raw = value as? String ?: continue
+            val payload = try {
+                JSONObject(raw)
+            } catch (_: Exception) {
+                staleKeys.add(key)
+                continue
+            }
+            val filePath = payload.optString("filePath")
+            val file = File(filePath)
+            if (filePath.isBlank() || !file.exists()) {
+                staleKeys.add(key)
+                continue
+            }
+            result[key] = mapOf(
+                "filePath" to file.absolutePath,
+                "packageName" to payload.optString("packageName").takeIf { it.isNotBlank() },
+                "versionCode" to payload.optLong("versionCode").takeIf { payload.has("versionCode") },
+                "versionName" to payload.optString("versionName").takeIf { it.isNotBlank() },
+                "fileSize" to file.length(),
+                "savedAt" to payload.optString("savedAt").takeIf { it.isNotBlank() },
+            )
+        }
+
+        if (staleKeys.isNotEmpty()) {
+            val editor = prefs.edit()
+            staleKeys.forEach { editor.remove(it) }
+            editor.apply()
+        }
+
+        return result
+    }
+
+    private fun installDownloadedApk(filePath: String?): Boolean {
+        val file = downloadedFile(filePath) ?: return false
+        return openApkInstaller(file)
+    }
+
+    private fun removeDownloadedApk(key: String?, filePath: String?): Boolean {
+        val prefs = getSharedPreferences(DOWNLOAD_PREFS, MODE_PRIVATE)
+        var removed = false
+
+        if (!key.isNullOrBlank()) {
+            val raw = prefs.getString(key, null)
+            if (!raw.isNullOrBlank()) {
+                val storedPath = try {
+                    JSONObject(raw).optString("filePath")
+                } catch (_: Exception) {
+                    null
+                }
+                removed = deleteDownloadedFile(storedPath) || removed
+            }
+            prefs.edit().remove(key).apply()
+        }
+
+        removed = deleteDownloadedFile(filePath) || removed
+        return removed
     }
 
     private fun openPackage(packageName: String?): Boolean {
@@ -252,67 +307,6 @@ class MainActivity : FlutterActivity() {
             ?.lowercase()
             ?.replace(Regex("[^a-z0-9]+"), "")
             ?: ""
-    }
-
-    private fun openPackageUninstaller(packageName: String?, result: MethodChannel.Result) {
-        if (packageName.isNullOrBlank()) {
-            result.success(false)
-            return
-        }
-
-        if (pendingUninstallResult != null) {
-            result.error("UNINSTALL_BUSY", "Another uninstall flow is already open", null)
-            return
-        }
-
-        val uninstallIntent = Intent(Intent.ACTION_UNINSTALL_PACKAGE).apply {
-            data = Uri.parse("package:$packageName")
-            putExtra(Intent.EXTRA_RETURN_RESULT, true)
-        }
-        if (tryStartActivityForResult(uninstallIntent, packageName, result)) return
-
-        val deleteIntent = Intent(Intent.ACTION_DELETE).apply {
-            data = Uri.parse("package:$packageName")
-        }
-        if (tryStartActivityForResult(deleteIntent, packageName, result)) return
-
-        val settingsIntent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-            data = Uri.parse("package:$packageName")
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        result.success(tryStartActivity(settingsIntent) && installedVersionCode(packageName) == null)
-    }
-
-    private fun tryStartActivityForResult(
-        intent: Intent,
-        packageName: String,
-        result: MethodChannel.Result,
-    ): Boolean {
-        return try {
-            pendingUninstallResult = result
-            pendingUninstallPackage = packageName
-            startActivityForResult(intent, UNINSTALL_REQUEST)
-            true
-        } catch (_: ActivityNotFoundException) {
-            pendingUninstallResult = null
-            pendingUninstallPackage = null
-            false
-        } catch (_: Exception) {
-            pendingUninstallResult = null
-            pendingUninstallPackage = null
-            false
-        }
-    }
-
-    private fun tryStartActivity(intent: Intent): Boolean {
-        return try {
-            startActivity(intent)
-            true
-        } catch (_: ActivityNotFoundException) {
-            false
-        } catch (_: Exception) {
-            false
-        }
     }
 
     private fun packageAliases(): Map<String, String> {
@@ -509,9 +503,6 @@ class MainActivity : FlutterActivity() {
         val downloadsDir = File(cacheDir, "downloads").apply {
             mkdirs()
         }
-        downloadsDir.listFiles()?.forEach { file ->
-            if (file.name.endsWith(".apk")) file.delete()
-        }
 
         val safeName = safeApkName(fileName)
         val apkFile = File(downloadsDir, "${System.currentTimeMillis()}-$safeName")
@@ -569,6 +560,57 @@ class MainActivity : FlutterActivity() {
             info.versionCode.toLong()
         }
         return ApkPackageInfo(info.packageName, versionCode, info.versionName)
+    }
+
+    private fun downloadedApkPayload(
+        apkFile: File,
+        packageInfo: ApkPackageInfo?,
+    ): Map<String, Any?> {
+        return mapOf(
+            "filePath" to apkFile.absolutePath,
+            "packageName" to packageInfo?.packageName,
+            "versionCode" to packageInfo?.versionCode,
+            "versionName" to packageInfo?.versionName,
+            "fileSize" to apkFile.length(),
+            "savedAt" to System.currentTimeMillis().toString(),
+        )
+    }
+
+    private fun rememberDownloadedApk(
+        key: String,
+        apkFile: File,
+        packageInfo: ApkPackageInfo?,
+    ) {
+        val payload = JSONObject()
+            .put("filePath", apkFile.absolutePath)
+            .put("fileSize", apkFile.length())
+            .put("savedAt", System.currentTimeMillis().toString())
+        packageInfo?.packageName?.let { payload.put("packageName", it) }
+        packageInfo?.versionCode?.let { payload.put("versionCode", it) }
+        packageInfo?.versionName?.let { payload.put("versionName", it) }
+
+        getSharedPreferences(DOWNLOAD_PREFS, MODE_PRIVATE)
+            .edit()
+            .putString(key, payload.toString())
+            .apply()
+    }
+
+    private fun downloadedFile(filePath: String?): File? {
+        if (filePath.isNullOrBlank()) return null
+        val downloadsDir = File(cacheDir, "downloads").canonicalFile
+        val file = File(filePath).canonicalFile
+        if (!file.path.startsWith(downloadsDir.path)) return null
+        if (!file.exists() || !file.name.endsWith(".apk", ignoreCase = true)) return null
+        return file
+    }
+
+    private fun deleteDownloadedFile(filePath: String?): Boolean {
+        val file = downloadedFile(filePath) ?: return false
+        return try {
+            file.delete()
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private fun sendDownloadProgress(downloadId: String?, downloadedBytes: Long, totalBytes: Long) {
@@ -652,9 +694,9 @@ class MainActivity : FlutterActivity() {
 
     companion object {
         private const val PICK_UPLOAD_REQUEST = 9401
-        private const val UNINSTALL_REQUEST = 9402
         private const val APK_MIME_TYPE = "application/vnd.android.package-archive"
         private const val ALIAS_PREFS = "matjari_package_aliases"
+        private const val DOWNLOAD_PREFS = "matjari_downloaded_apks"
         private const val SESSION_PREFS = "matjari_session"
         private const val SESSION_KEY = "session_json"
     }

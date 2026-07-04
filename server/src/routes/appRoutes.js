@@ -8,6 +8,7 @@ router.get('/', appsController.listApps);
 router.post('/', requireAuth, requireAdmin, appsController.createApp);
 router.get('/analytics/overview', requireAuth, requireAdmin, appsController.getAnalytics);
 router.get('/package/:packageName/check-update', appsController.checkPackageUpdate);
+router.get('/:id/updates', appsController.listUpdates);
 router.get('/:id', appsController.getApp);
 router.put('/:id', requireAuth, requireAdmin, appsController.updateApp);
 router.delete('/:id', requireAuth, requireAdmin, appsController.deleteApp);
