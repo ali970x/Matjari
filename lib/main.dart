@@ -7402,6 +7402,12 @@ void _showEditSheet(
   final screenshotsController = TextEditingController(
     text: item?.screenshotUrls.join('\n') ?? '',
   );
+  final screenshotUrlController = TextEditingController();
+  var screenshotUrls = _lines(screenshotsController.text);
+  void syncScreenshotController() {
+    screenshotsController.text = screenshotUrls.join('\n');
+  }
+
   var forceUpdate = item?.forceUpdate ?? false;
   var saving = false;
   var uploadingIcon = false;
@@ -7558,14 +7564,120 @@ void _showEditSheet(
               label: Text(uploadingFile ? 'Uploading APK' : 'Upload APK'),
             ),
             const SizedBox(height: 12),
-            TextField(
-              decoration: const InputDecoration(
-                labelText: 'Screenshot URLs',
-                helperText: 'One URL per line',
+            Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'Screenshots',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+                  ),
+                ),
+                StatusPill(text: '${screenshotUrls.length} images'),
+              ],
+            ),
+            const SizedBox(height: 10),
+            if (screenshotUrls.isEmpty)
+              Container(
+                height: 128,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  border: Border.all(color: _line),
+                  borderRadius: BorderRadius.circular(8),
+                  color: const Color(0xFFF8FAFC),
+                ),
+                child: const Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.image_not_supported_outlined, color: _muted),
+                    SizedBox(height: 8),
+                    Text(
+                      'No screenshots yet',
+                      style: TextStyle(
+                        color: _muted,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            else
+              SizedBox(
+                height: 150,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemBuilder: (context, index) {
+                    final url = screenshotUrls[index];
+                    return SizedBox(
+                      width: 96,
+                      child: Stack(
+                        children: [
+                          Positioned.fill(
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: Container(
+                                color: const Color(0xFFF1F5F9),
+                                child: Image.network(
+                                  url,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, _, _) => const Icon(
+                                    Icons.broken_image_outlined,
+                                    color: _muted,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          Positioned(
+                            top: 6,
+                            right: 6,
+                            child: IconButton.filled(
+                              tooltip: 'Remove screenshot',
+                              onPressed: saving || uploadingScreenshots
+                                  ? null
+                                  : () => setSheetState(() {
+                                      screenshotUrls.removeAt(index);
+                                      syncScreenshotController();
+                                    }),
+                              icon: const Icon(Icons.close, size: 16),
+                              style: IconButton.styleFrom(
+                                backgroundColor: Colors.white,
+                                foregroundColor: _ink,
+                                minimumSize: const Size(30, 30),
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                  separatorBuilder: (_, _) => const SizedBox(width: 10),
+                  itemCount: screenshotUrls.length,
+                ),
               ),
-              controller: screenshotsController,
-              minLines: 2,
-              maxLines: 4,
+            const SizedBox(height: 10),
+            TextField(
+              decoration: InputDecoration(
+                labelText: 'Add screenshot URL',
+                suffixIcon: IconButton(
+                  tooltip: 'Add URL',
+                  onPressed: saving
+                      ? null
+                      : () => setSheetState(() {
+                          final incoming = _lines(screenshotUrlController.text);
+                          for (final url in incoming) {
+                            if (!screenshotUrls.contains(url)) {
+                              screenshotUrls.add(url);
+                            }
+                          }
+                          screenshotUrlController.clear();
+                          syncScreenshotController();
+                        }),
+                  icon: const Icon(Icons.add_link),
+                ),
+              ),
+              controller: screenshotUrlController,
+              keyboardType: TextInputType.url,
             ),
             const SizedBox(height: 10),
             OutlinedButton.icon(
@@ -7583,11 +7695,14 @@ void _showEditSheet(
                         );
                         if (uploads.isNotEmpty) {
                           final urls = uploads.map((upload) => upload.url);
-                          final current = screenshotsController.text.trim();
-                          screenshotsController.text = [
-                            if (current.isNotEmpty) current,
-                            ...urls,
-                          ].join('\n');
+                          setSheetState(() {
+                            for (final url in urls) {
+                              if (!screenshotUrls.contains(url)) {
+                                screenshotUrls.add(url);
+                              }
+                            }
+                            syncScreenshotController();
+                          });
                           if (context.mounted) {
                             _showSnack(context, 'Screenshots uploaded.');
                           }
@@ -7627,9 +7742,12 @@ void _showEditSheet(
                                 allowMultiple: true,
                               );
                               if (uploads.isNotEmpty) {
-                                screenshotsController.text = uploads
-                                    .map((upload) => upload.url)
-                                    .join('\n');
+                                setSheetState(() {
+                                  screenshotUrls = uploads
+                                      .map((upload) => upload.url)
+                                      .toList();
+                                  syncScreenshotController();
+                                });
                                 if (context.mounted) {
                                   _showSnack(context, 'Screenshots replaced.');
                                 }
@@ -7655,9 +7773,10 @@ void _showEditSheet(
                   child: OutlinedButton.icon(
                     onPressed: saving || uploadingScreenshots
                         ? null
-                        : () => setSheetState(
-                            () => screenshotsController.clear(),
-                          ),
+                        : () => setSheetState(() {
+                            screenshotUrls.clear();
+                            syncScreenshotController();
+                          }),
                     icon: const Icon(Icons.clear),
                     label: const Text('Clear'),
                   ),
@@ -7702,7 +7821,7 @@ void _showEditSheet(
                           size: sizeController.text.trim().ifEmpty('Unknown'),
                           iconUrl: iconUrlController.text.trim(),
                           fileUrl: fileUrlController.text.trim(),
-                          screenshotUrls: _lines(screenshotsController.text),
+                          screenshotUrls: screenshotUrls,
                           forceUpdate: forceUpdate,
                         );
                         onSaved();
