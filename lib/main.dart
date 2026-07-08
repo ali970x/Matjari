@@ -2664,16 +2664,12 @@ class _MatjariShellState extends State<MatjariShell>
     final localBuild = _installedBuilds[key];
     if (localBuild != null) return localBuild;
     if (!item.installed) return null;
-    if (item.updateAvailable || item.forceUpdate) {
-      return item.versionCode > 1 ? item.versionCode - 1 : 0;
-    }
     return item.versionCode;
   }
 
   bool _needsUpdate(StoreItem item) {
     final installedBuild = _installedBuild(item);
-    return installedBuild != null &&
-        (item.forceUpdate || item.versionCode > installedBuild);
+    return installedBuild != null && item.versionCode > installedBuild;
   }
 
   double? _progressFor(StoreItem item) {
@@ -4062,9 +4058,7 @@ class AppListTile extends StatelessWidget {
                       if (item.installed) const StatusPill(text: 'Installed'),
                       if (label == 'Install' || label == 'Install update')
                         const StatusPill(text: 'Downloaded'),
-                      if (item.updateAvailable ||
-                          label == 'Update' ||
-                          label == 'Install update')
+                      if (label == 'Update' || label == 'Install update')
                         const StatusPill(text: 'Update'),
                       if (item.price != null) StatusPill(text: item.price!),
                     ],
@@ -4645,7 +4639,7 @@ class AppDetailsPage extends StatelessWidget {
                   const StatusPill(text: 'Phone'),
                   const StatusPill(text: 'Android'),
                   if (item.forceUpdate) const StatusPill(text: 'Force update'),
-                  if (item.updateAvailable)
+                  if (actionText == 'Update' || actionText == 'Install update')
                     const StatusPill(text: 'Update available'),
                 ],
               ),
@@ -5726,9 +5720,10 @@ class _YouPageState extends State<YouPage> {
     final visibleInstalled = installed.isEmpty
         ? widget.items.take(4).toList()
         : installed;
-    final updates = widget.items
-        .where((item) => item.forceUpdate || item.updateAvailable)
-        .toList();
+    final updates = widget.items.where((item) {
+      final label = widget.actionLabelFor(item);
+      return label == 'Update' || label == 'Install update';
+    }).toList();
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
@@ -8366,7 +8361,6 @@ void showAppSettingsSheet(BuildContext context) {
 }
 
 String _defaultActionText(StoreItem item) {
-  if (item.updateAvailable) return 'Update';
   if (item.installed) return 'Open';
   if (item.type != 'books' && (item.fileUrl?.trim().isEmpty ?? true)) {
     return 'Preview';
