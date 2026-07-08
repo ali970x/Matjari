@@ -191,6 +191,9 @@ class StoreItem {
     this.downloads = '10K+',
     this.packageName = '',
     this.platform = 'android',
+    this.categoryId = '',
+    this.subcategoryId,
+    this.subcategory,
     this.iconUrl,
     this.fileUrl,
     this.screenshotUrls = const [],
@@ -209,6 +212,9 @@ class StoreItem {
         _stringValue(json['category']) ??
         'Apps';
     final type = _stringValue(category['type']) ?? 'apps';
+    final subcategory = json['subcategory'] is Map<String, dynamic>
+        ? json['subcategory'] as Map<String, dynamic>
+        : <String, dynamic>{};
     final name = _stringValue(json['name']) ?? 'Untitled app';
     final packageName = _stringValue(json['package_name']) ?? '';
     final rating = _doubleValue(json['rating']) ?? _ratingForName(name);
@@ -228,6 +234,9 @@ class StoreItem {
       downloads: _downloadLabel(_intValue(json['downloads_count']) ?? 0),
       packageName: packageName,
       platform: _stringValue(json['platform']) ?? 'android',
+      categoryId: _stringValue(json['category_id']) ?? '',
+      subcategoryId: _stringValue(json['subcategory_id']),
+      subcategory: _stringValue(subcategory['name']),
       iconUrl: _absoluteApiUrl(_stringValue(json['icon_url'])),
       fileUrl: _absoluteApiUrl(
         _stringValue(json['file_url']) ?? _stringValue(json['apk_file_url']),
@@ -258,6 +267,9 @@ class StoreItem {
   final String downloads;
   final String packageName;
   final String platform;
+  final String categoryId;
+  final String? subcategoryId;
+  final String? subcategory;
   final String? iconUrl;
   final String? fileUrl;
   final List<String> screenshotUrls;
@@ -291,6 +303,9 @@ class StoreItem {
       downloads: downloads,
       packageName: packageName,
       platform: platform,
+      categoryId: categoryId,
+      subcategoryId: subcategoryId,
+      subcategory: subcategory,
       iconUrl: iconUrl,
       fileUrl: fileUrl ?? this.fileUrl,
       screenshotUrls: screenshotUrls,
@@ -448,6 +463,7 @@ class StoreCategory {
     required this.id,
     required this.name,
     required this.type,
+    this.subcategories = const [],
   });
 
   factory StoreCategory.fromApi(Map<String, dynamic> json) {
@@ -455,12 +471,39 @@ class StoreCategory {
       id: _stringValue(json['id']) ?? '',
       name: _stringValue(json['name']) ?? 'Category',
       type: _stringValue(json['type']) ?? 'apps',
+      subcategories: json['subcategories'] is List
+          ? (json['subcategories'] as List)
+                .whereType<Map<String, dynamic>>()
+                .map(StoreSubcategory.fromApi)
+                .toList()
+          : const [],
     );
   }
 
   final String id;
   final String name;
   final String type;
+  final List<StoreSubcategory> subcategories;
+}
+
+class StoreSubcategory {
+  const StoreSubcategory({
+    required this.id,
+    required this.categoryId,
+    required this.name,
+  });
+
+  factory StoreSubcategory.fromApi(Map<String, dynamic> json) {
+    return StoreSubcategory(
+      id: _stringValue(json['id']) ?? '',
+      categoryId: _stringValue(json['category_id']) ?? '',
+      name: _stringValue(json['name']) ?? 'Subcategory',
+    );
+  }
+
+  final String id;
+  final String categoryId;
+  final String name;
 }
 
 class StoreData {
@@ -859,6 +902,8 @@ class MatjariApi {
     required String token,
     StoreItem? existing,
     required String name,
+    required String categoryId,
+    String? subcategoryId,
     required String packageName,
     required String description,
     required String platform,
@@ -872,6 +917,8 @@ class MatjariApi {
   }) async {
     final payload = {
       'name': name,
+      'category_id': categoryId,
+      'subcategory_id': subcategoryId,
       'package_name': packageName,
       'description': description,
       'platform': platform,
@@ -1040,13 +1087,47 @@ class MatjariApi {
 }
 
 const _fallbackCategories = [
-  StoreCategory(id: 'apps', name: 'Apps', type: 'apps'),
-  StoreCategory(id: 'games', name: 'Games', type: 'games'),
-  StoreCategory(id: 'books', name: 'Books', type: 'books'),
-  StoreCategory(id: 'shopping', name: 'Shopping', type: 'apps'),
-  StoreCategory(id: 'productivity', name: 'Productivity', type: 'apps'),
-  StoreCategory(id: 'action', name: 'Action', type: 'games'),
-  StoreCategory(id: 'simulation', name: 'Simulation', type: 'games'),
+  StoreCategory(
+    id: 'apps',
+    name: 'Apps',
+    type: 'apps',
+    subcategories: [
+      StoreSubcategory(id: 'shopping', categoryId: 'apps', name: 'Shopping'),
+      StoreSubcategory(
+        id: 'productivity',
+        categoryId: 'apps',
+        name: 'Productivity',
+      ),
+      StoreSubcategory(id: 'social', categoryId: 'apps', name: 'Social'),
+    ],
+  ),
+  StoreCategory(
+    id: 'games',
+    name: 'Games',
+    type: 'games',
+    subcategories: [
+      StoreSubcategory(id: 'action', categoryId: 'games', name: 'Action'),
+      StoreSubcategory(id: 'strategy', categoryId: 'games', name: 'Strategy'),
+      StoreSubcategory(
+        id: 'simulation',
+        categoryId: 'games',
+        name: 'Simulation',
+      ),
+    ],
+  ),
+  StoreCategory(
+    id: 'books',
+    name: 'Books',
+    type: 'books',
+    subcategories: [
+      StoreSubcategory(id: 'ebooks', categoryId: 'books', name: 'Ebooks'),
+      StoreSubcategory(
+        id: 'audiobooks',
+        categoryId: 'books',
+        name: 'Audiobooks',
+      ),
+    ],
+  ),
 ];
 
 String? _stringValue(Object? value) {
@@ -3067,6 +3148,7 @@ class _MatjariShellState extends State<MatjariShell>
           YouPage(
             api: _api,
             items: store.items,
+            categories: store.categories,
             session: _session,
             activeDownloads: activeDownloads,
             updateCount: updateCount,
@@ -5662,6 +5744,7 @@ class YouPage extends StatefulWidget {
     super.key,
     required this.api,
     required this.items,
+    required this.categories,
     required this.session,
     required this.activeDownloads,
     required this.updateCount,
@@ -5678,6 +5761,7 @@ class YouPage extends StatefulWidget {
 
   final MatjariApi api;
   final List<StoreItem> items;
+  final List<StoreCategory> categories;
   final AuthSession? session;
   final int activeDownloads;
   final int updateCount;
@@ -5811,6 +5895,7 @@ class _YouPageState extends State<YouPage> {
                     apps: widget.items
                         .where((item) => item.type != 'books')
                         .toList(),
+                    categories: widget.categories,
                     session: widget.session!,
                     onChanged: widget.onRefresh,
                   ),
@@ -6416,12 +6501,14 @@ class AdminDashboardPage extends StatelessWidget {
     super.key,
     required this.api,
     required this.apps,
+    required this.categories,
     required this.session,
     required this.onChanged,
   });
 
   final MatjariApi api;
   final List<StoreItem> apps;
+  final List<StoreCategory> categories;
   final AuthSession session;
   final VoidCallback onChanged;
 
@@ -6455,6 +6542,7 @@ class AdminDashboardPage extends StatelessWidget {
                 onPressed: () => _showEditSheet(
                   context,
                   api: api,
+                  categories: categories,
                   session: session,
                   onSaved: onChanged,
                 ),
@@ -6490,6 +6578,7 @@ class AdminDashboardPage extends StatelessWidget {
                 context,
                 item: app,
                 api: api,
+                categories: categories,
                 session: session,
                 onSaved: onChanged,
               ),
@@ -7131,7 +7220,12 @@ class AdminAppRow extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '${item.category} - ${item.version} - Android',
+                  [
+                    item.category,
+                    if (item.subcategory?.isNotEmpty == true) item.subcategory!,
+                    item.version,
+                    'Android',
+                  ].join(' - '),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(color: _muted),
@@ -7373,9 +7467,40 @@ void _showEditSheet(
   BuildContext context, {
   StoreItem? item,
   required MatjariApi api,
+  required List<StoreCategory> categories,
   required AuthSession session,
   required VoidCallback onSaved,
 }) {
+  final usableCategories = categories.isEmpty
+      ? _fallbackCategories
+      : categories;
+  var selectedCategoryId =
+      (item != null && item.categoryId.isNotEmpty ? item.categoryId : null) ??
+      usableCategories
+          .firstWhere(
+            (category) => category.type == 'apps',
+            orElse: () => usableCategories.first,
+          )
+          .id;
+  if (!usableCategories.any((category) => category.id == selectedCategoryId)) {
+    selectedCategoryId = usableCategories.first.id;
+  }
+  var selectedSubcategoryId = item?.subcategoryId;
+  List<StoreSubcategory> selectedSubcategories() {
+    return usableCategories
+        .firstWhere(
+          (category) => category.id == selectedCategoryId,
+          orElse: () => usableCategories.first,
+        )
+        .subcategories;
+  }
+
+  if (!selectedSubcategories().any(
+    (item) => item.id == selectedSubcategoryId,
+  )) {
+    selectedSubcategoryId = null;
+  }
+
   final nameController = TextEditingController(text: item?.name ?? '');
   final packageController = TextEditingController(
     text:
@@ -7431,6 +7556,63 @@ void _showEditSheet(
             TextField(
               decoration: const InputDecoration(labelText: 'App name'),
               controller: nameController,
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue: selectedCategoryId,
+              decoration: const InputDecoration(labelText: 'Category'),
+              items: [
+                for (final category in usableCategories)
+                  DropdownMenuItem(
+                    value: category.id,
+                    child: Text('${category.name} (${category.type})'),
+                  ),
+              ],
+              onChanged: saving
+                  ? null
+                  : (value) => setSheetState(() {
+                      if (value == null || value == selectedCategoryId) return;
+                      selectedCategoryId = value;
+                      selectedSubcategoryId = null;
+                    }),
+            ),
+            const SizedBox(height: 12),
+            Builder(
+              builder: (context) {
+                final subcategories = selectedSubcategories();
+                return DropdownButtonFormField<String>(
+                  key: ValueKey(selectedCategoryId),
+                  initialValue:
+                      subcategories.any(
+                        (subcategory) =>
+                            subcategory.id == selectedSubcategoryId,
+                      )
+                      ? selectedSubcategoryId
+                      : null,
+                  decoration: const InputDecoration(
+                    labelText: 'Subcategory',
+                    helperText: 'Optional, filtered by selected category',
+                  ),
+                  items: [
+                    const DropdownMenuItem(
+                      value: '',
+                      child: Text('No subcategory'),
+                    ),
+                    for (final subcategory in subcategories)
+                      DropdownMenuItem(
+                        value: subcategory.id,
+                        child: Text(subcategory.name),
+                      ),
+                  ],
+                  onChanged: saving
+                      ? null
+                      : (value) => setSheetState(() {
+                          selectedSubcategoryId = value == null || value.isEmpty
+                              ? null
+                              : value;
+                        }),
+                );
+              },
             ),
             const SizedBox(height: 12),
             TextField(
@@ -7806,6 +7988,8 @@ void _showEditSheet(
                           token: session.token,
                           existing: item,
                           name: nameController.text.trim(),
+                          categoryId: selectedCategoryId,
+                          subcategoryId: selectedSubcategoryId,
                           packageName: packageController.text.trim(),
                           description: descriptionController.text.trim(),
                           platform: 'android',

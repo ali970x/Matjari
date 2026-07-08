@@ -30,9 +30,11 @@ const getApp = asyncHandler(async (req, res) => {
 const createApp = asyncHandler(async (req, res) => {
   const payload = normalizeAppPayload(req.body);
   const screenshotUrls = takeScreenshotUrls(payload);
+  const categoryId = payload.category_id || defaultCategoryId('apps');
+  validateCategorySelection(categoryId, payload.subcategory_id);
   const app = await store.create('apps', {
     ...payload,
-    category_id: payload.category_id || defaultCategoryId('apps'),
+    category_id: categoryId,
     is_active: payload.is_active ?? true,
     is_force_update: payload.is_force_update ?? false,
     updated_at: new Date().toISOString(),
@@ -44,6 +46,15 @@ const createApp = asyncHandler(async (req, res) => {
 const updateApp = asyncHandler(async (req, res) => {
   const payload = normalizeAppPayload(req.body, true);
   const screenshotUrls = takeScreenshotUrls(payload);
+  const existing = store.findById('apps', req.params.id);
+  if (!existing) throw httpError(404, 'App not found');
+  validateCategorySelection(
+    payload.category_id ?? existing.category_id,
+    payload.subcategory_id,
+  );
+  if (payload.category_id && payload.subcategory_id === undefined) {
+    payload.subcategory_id = null;
+  }
   const app = await store.update('apps', req.params.id, payload);
   if (screenshotUrls !== null) await replaceScreenshots(app.id, screenshotUrls);
   res.json({ app: withRelations(app) });
@@ -284,6 +295,18 @@ async function replaceScreenshots(appId, urls) {
 
 function defaultCategoryId(type) {
   return store.all('categories').find((item) => item.type === type)?.id;
+}
+
+function validateCategorySelection(categoryId, subcategoryId) {
+  if (!categoryId || !store.findById('categories', categoryId)) {
+    throw httpError(400, 'Valid category_id is required');
+  }
+  if (!subcategoryId) return;
+
+  const subcategory = store.findById('subcategories', subcategoryId);
+  if (!subcategory || subcategory.category_id !== categoryId) {
+    throw httpError(400, 'subcategory_id must belong to selected category_id');
+  }
 }
 
 function parseBoolean(value) {

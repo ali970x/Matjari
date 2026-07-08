@@ -3,7 +3,12 @@ const asyncHandler = require('../utils/asyncHandler');
 const { httpError } = require('../utils/httpError');
 
 const listCategories = asyncHandler(async (_req, res) => {
-  res.json({ categories: store.all('categories') });
+  const subcategories = store.all('subcategories');
+  const categories = store.all('categories').map((category) => ({
+    ...category,
+    subcategories: subcategories.filter((item) => item.category_id === category.id),
+  }));
+  res.json({ categories });
 });
 
 const createCategory = asyncHandler(async (req, res) => {
