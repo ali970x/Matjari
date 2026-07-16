@@ -867,12 +867,13 @@ class MatjariApi {
   Future<void> saveUserApp({
     required String token,
     required StoreItem item,
+    int? installedVersionCode,
   }) async {
     if (item.id.isEmpty) return;
     await _post('/api/library/me', {
       'app_id': item.id,
       'platform': item.platform,
-      'version_code': item.versionCode,
+      'version_code': installedVersionCode ?? item.versionCode,
     }, token: token);
   }
 
@@ -3025,7 +3026,11 @@ class _MatjariShellState extends State<MatjariShell>
         if (installed.containsKey(key)) {
           unawaited(
             _api
-                .saveUserApp(token: token, item: item)
+                .saveUserApp(
+                  token: token,
+                  item: item,
+                  installedVersionCode: installed[key],
+                )
                 .catchError((Object _) {}),
           );
         }
@@ -7427,13 +7432,24 @@ void _showUpdateSheet(
                   : () async {
                       setSheetState(() => saving = true);
                       try {
+                        final versionCode =
+                            int.tryParse(versionCodeController.text.trim()) ??
+                            app.versionCode + 1;
+                        if (versionCode <= app.versionCode) {
+                          throw Exception(
+                            'Build must be greater than current build ${app.versionCode}.',
+                          );
+                        }
+                        if (fileUrlController.text.trim().isEmpty) {
+                          throw Exception(
+                            'Upload an APK before releasing update.',
+                          );
+                        }
                         await api.releaseUpdate(
                           token: session.token,
                           app: app,
                           versionName: versionController.text.trim(),
-                          versionCode:
-                              int.tryParse(versionCodeController.text.trim()) ??
-                              app.versionCode + 1,
+                          versionCode: versionCode,
                           fileUrl: fileUrlController.text.trim(),
                           forceUpdate: forceUpdate,
                           changelog: changelogController.text.trim(),

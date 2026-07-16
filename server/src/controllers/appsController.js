@@ -80,6 +80,14 @@ const createUpdate = asyncHandler(async (req, res) => {
   if (!req.body.version_name || Number.isNaN(versionCode)) {
     throw httpError(400, 'version_name and version_code are required');
   }
+  if (versionCode <= Number(app.version_code || 0)) {
+    throw httpError(400, 'version_code must be greater than current app version_code');
+  }
+
+  const fileUrl = req.body.file_url || req.body.apk_file_url || null;
+  if (!fileUrl) {
+    throw httpError(400, 'file_url is required for app updates');
+  }
 
   await ensureVersionSnapshot(app);
 
@@ -87,7 +95,7 @@ const createUpdate = asyncHandler(async (req, res) => {
     app_id: app.id,
     version_name: req.body.version_name,
     version_code: versionCode,
-    file_url: req.body.file_url || req.body.apk_file_url || null,
+    file_url: fileUrl,
     is_force_update: parseBoolean(req.body.is_force_update),
     changelog: req.body.changelog || '',
   });
